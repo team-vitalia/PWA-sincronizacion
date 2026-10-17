@@ -24,6 +24,7 @@ app.get("/api/health", (_req, res) => res.json({ ok: true, service: "ExploraPWA 
 
 // Idempotencia: cada registro tiene un id creado por el cliente. Si se reenvía,
 // el servidor no lo duplica.
+//1
 app.post("/api/sync", (req, res) => {
   const incoming = Array.isArray(req.body.records) ? req.body.records : [];
   if (!incoming.length) return res.status(400).json({ error: "Envía records como arreglo." });

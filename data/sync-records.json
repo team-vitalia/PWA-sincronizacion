@@ -6,5 +6,21 @@
     "detail": "vbbknkln",
     "createdAt": "2026-10-17T14:55:22.463Z",
     "syncedAt": "2026-10-17T14:55:26.049Z"
+  },
+  {
+    "id": "319b0c92-3a50-4cfc-9302-17bdec24d664",
+    "type": "nota",
+    "title": "Una misión espacial que le llamó la atención.",
+    "detail": "vubyb",
+    "createdAt": "2026-10-17T15:09:00.757Z",
+    "syncedAt": "2026-10-17T15:09:22.144Z"
+  },
+  {
+    "id": "5277481d-0d62-468e-ad8d-2341352e0365",
+    "type": "nota",
+    "title": "El nombre de un cohete que quiere investigar.",
+    "detail": "vyjbk",
+    "createdAt": "2026-10-17T15:10:07.418Z",
+    "syncedAt": "2026-10-17T15:12:09.032Z"
   }
 ]
