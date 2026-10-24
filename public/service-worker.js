@@ -1,12 +1,13 @@
-// Importar helper de IndexedDB para tener acceso a la base de datos en segundo plano
 try {
   importScripts("/idb-helper.js");
 } catch (e) {
-  console.error("[SW] Error al importar idb-helper.js:", e);
 }
 
-const CACHE_NAME = "cosmobitacora-static-v2";
-const APP_SHELL = [
+const CACHE_STATIC_NAME = "cosmobitacora-static-v3";
+const CACHE_IMAGES_NAME = "cosmobitacora-images-v1";
+const CACHE_API_NAME = "cosmobitacora-api-v1";
+
+const APP_SHELL_ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
@@ -18,72 +19,117 @@ const APP_SHELL = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_STATIC_NAME)
+      .then((cache) => cache.addAll(APP_SHELL_ASSETS))
       .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener("activate", (event) => {
+  const allowedCaches = [CACHE_STATIC_NAME, CACHE_IMAGES_NAME, CACHE_API_NAME];
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      ))
+      .then((keys) => {
+        return Promise.all(
+          keys
+            .filter((key) => !allowedCaches.includes(key))
+            .map((key) => caches.delete(key))
+        );
+      })
       .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-  if (event.request.method !== "GET") return;
+  const request = event.request;
+  const url = new URL(request.url);
 
-  // API externa y API local de sincronización no se interceptan en caché de navegación estática
-  if (url.hostname === "api.spaceflightnewsapi.net") return;
-  if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) return;
+  if (request.method !== "GET") {
+    return;
+  }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request).then((response) => {
-        if (response && response.ok && url.origin === self.location.origin) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+  if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) {
+    return;
+  }
+
+  if (request.mode === "navigate") {
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
+        if (cachedResponse) {
+          return cachedResponse;
         }
-        return response;
-      }).catch(() => cached || caches.match("/index.html"));
+        return fetch(request).catch(() => caches.match("/index.html"));
+      })
+    );
+    return;
+  }
 
-      return cached || network;
-    })
-  );
+  if (request.destination === "image" || url.pathname.match(/\.(png|jpg|jpeg|svg|webp)$/i)) {
+    event.respondWith(
+      caches.open(CACHE_IMAGES_NAME).then((cache) => {
+        return cache.match(request).then((cachedResponse) => {
+          const fetchPromise = fetch(request).then((networkResponse) => {
+            if (networkResponse && networkResponse.status === 200) {
+              cache.put(request, networkResponse.clone());
+            }
+            return networkResponse;
+          }).catch(() => null);
+
+          return cachedResponse || fetchPromise;
+        });
+      })
+    );
+    return;
+  }
+
+  if (url.hostname === "api.spaceflightnewsapi.net") {
+    event.respondWith(
+      fetch(request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseClone = networkResponse.clone();
+            caches.open(CACHE_API_NAME).then((cache) => cache.put(request, responseClone));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  if (url.origin === self.location.origin) {
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
+        const fetchPromise = fetch(request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseClone = networkResponse.clone();
+            caches.open(CACHE_STATIC_NAME).then((cache) => cache.put(request, responseClone));
+          }
+          return networkResponse;
+        }).catch(() => cachedResponse || caches.match("/index.html"));
+
+        return cachedResponse || fetchPromise;
+      })
+    );
+  }
 });
 
-// ==========================================
-// BACKGROUND SYNC - SINCRONIZACIÓN EN SEGUNDO PLANO
-// ==========================================
 self.addEventListener("sync", (event) => {
   if (event.tag === "sync-notes" || event.tag === "cosmobitacora-sync") {
-    console.log(`[SW] Evento de sincronización en segundo plano recibido (${event.tag})`);
     event.waitUntil(syncPendingNotes());
   }
 });
 
-/**
- * Procesa la cola de sincronización pendiente desde IndexedDB y la envía al servidor.
- */
 async function syncPendingNotes() {
   if (!self.CosmoDB) {
-    console.warn("[SW] CosmoDB no disponible para sincronización.");
     return;
   }
 
   try {
     const queue = await self.CosmoDB.getSyncQueue();
     if (!queue || !queue.length) {
-      console.log("[SW] No hay registros pendientes en IndexedDB.");
       return;
     }
-
-    console.log(`[SW] Sincronizando ${queue.length} registro(s) pendientes con /api/sync...`);
 
     const response = await fetch("/api/sync", {
       method: "POST",
@@ -98,15 +144,9 @@ async function syncPendingNotes() {
     const result = await response.json();
     const ids = queue.map((item) => item.id);
 
-    // 1. Limpiar registros de la cola en IndexedDB
     await self.CosmoDB.removeManyFromSyncQueue(ids);
-
-    // 2. Marcar las notas correspondientes como sincronizadas en IndexedDB
     await self.CosmoDB.markNotesAsSynced(ids);
 
-    console.log(`[SW] Sincronización exitosa: ${ids.length} registros procesados.`);
-
-    // 3. Notificar a las ventanas abiertas para refrescar la interfaz sin recargar
     const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const client of clients) {
       client.postMessage({
@@ -117,8 +157,55 @@ async function syncPendingNotes() {
       });
     }
   } catch (error) {
-    console.error("[SW] Error durante Background Sync:", error);
-    // Relanzar el error le indica al Background Sync que vuelva a intentar más tarde con backoff
     throw error;
   }
 }
+
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch (e) {
+    payload = {
+      title: "Alerta del Universo",
+      body: event.data.text()
+    };
+  }
+
+  const options = {
+    body: payload.body || "Nuevo evento astronómico registrado.",
+    icon: "/icons/icon.svg",
+    badge: "/icons/icon.svg",
+    tag: payload.tag || "celestial-alert",
+    renotify: true,
+    data: {
+      url: payload.url || "/"
+    }
+  };
+
+  event.waitUntil(self.registration.showNotification(payload.title || "CosmoBitácora Alerta", options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) ? event.notification.data.url : "/";
+
+  if (event.action === "dismiss") {
+    return;
+  }
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url === targetUrl && "focus" in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+    })
+  );
+});

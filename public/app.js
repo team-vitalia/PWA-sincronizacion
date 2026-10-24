@@ -1,8 +1,10 @@
 const API_URL = "https://api.spaceflightnewsapi.net/v4/articles/?limit=12";
 const $ = (id) => document.getElementById(id);
 const FAVORITES_KEY = "cosmobitacora_favorites_v1";
-const NOTES_KEY = "cosmobitacora_notes_v1"; // Clave heredada para migración a IndexedDB
-const QUEUE_KEY = "cosmobitacora_sync_queue_v1"; // Clave heredada para migración a IndexedDB
+const NOTES_KEY = "cosmobitacora_notes_v1";
+const QUEUE_KEY = "cosmobitacora_sync_queue_v1";
+const VAPID_PUBLIC_KEY = "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U";
+
 let articles = [];
 let currentView = "noticias";
 
@@ -47,13 +49,204 @@ function updateConnection() {
 function showMessage(text, type = "info") {
   $("message").textContent = text;
   $("message").classList.remove("hidden");
-  $("message").style.background = type === "error" ? "#fff0ed" : "#fff5e8";
-  $("message").style.color = type === "error" ? "#8c392b" : "#80552c";
+  $("message").style.background = type === "error" ? "#fff0ed" : (type === "success" ? "#eaf8f4" : "#fff5e8");
+  $("message").style.color = type === "error" ? "#8c392b" : (type === "success" ? "#207865" : "#80552c");
 }
 
 function hideMessage() {
   $("message").classList.add("hidden");
 }
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    throw new Error("Service Worker no es soportado en este entorno de navegación.");
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
+
+    registration.addEventListener("updatefound", () => {
+      const installingWorker = registration.installing;
+      if (!installingWorker) return;
+
+      installingWorker.addEventListener("statechange", () => {
+        if (installingWorker.state === "installed" && navigator.serviceWorker.controller) {
+          window.dispatchEvent(new CustomEvent("swUpdateAvailable"));
+        }
+      });
+    });
+
+    return registration;
+  } catch (error) {
+    throw new Error(`Fallo en el registro del Service Worker: ${error.message}`);
+  }
+}
+
+const requestNotificationPermission = async () => {
+  if (!("Notification" in window)) {
+    throw new Error("La API de notificaciones no es soportada en este navegador.");
+  }
+
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    throw new Error(`Permiso de notificaciones no concedido: ${permission}`);
+  }
+
+  return permission;
+};
+
+const triggerAstronomicalNotification = async (astronomicalEvent) => {
+  const permission = await requestNotificationPermission();
+  if (permission !== "granted") {
+    return false;
+  }
+
+  const registration = await navigator.serviceWorker.ready;
+  const notificationOptions = {
+    body: astronomicalEvent.description,
+    icon: "/icons/icon.svg",
+    badge: "/icons/icon.svg",
+    tag: `astro-event-${astronomicalEvent.id}`,
+    renotify: true,
+    data: {
+      url: astronomicalEvent.detailsUrl || "#inicio",
+      timestamp: Date.now()
+    },
+    actions: [
+      { action: "observe", title: "Ver Coordenadas" },
+      { action: "dismiss", title: "Descartar" }
+    ]
+  };
+
+  await registration.showNotification(astronomicalEvent.title, notificationOptions);
+  return true;
+};
+
+const urlBase64ToUint8Array = (base64String) => {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+};
+
+const subscribeToAstronomicalAlerts = async (publicVapidKey) => {
+  await requestNotificationPermission();
+  const registration = await navigator.serviceWorker.ready;
+
+  let subscription = await registration.pushManager.getSubscription();
+
+  if (!subscription) {
+    const convertedVapidKey = urlBase64ToUint8Array(publicVapidKey);
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: convertedVapidKey
+    });
+  }
+
+  const response = await fetch("/api/subscribe", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(subscription)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Fallo al registrar la suscripción push en el servidor: ${response.status}`);
+  }
+
+  return await response.json();
+};
+
+const getCelestialObserverPosition = async () => {
+  if (!("geolocation" in navigator)) {
+    throw new Error("El dispositivo no cuenta con hardware de geolocalización compatible.");
+  }
+
+  if ("permissions" in navigator) {
+    try {
+      const permissionStatus = await navigator.permissions.query({ name: "geolocation" });
+      if (permissionStatus.state === "denied") {
+        throw new Error("El acceso a la ubicación satelital ha sido bloqueado en los ajustes del navegador.");
+      }
+    } catch (e) {
+    }
+  }
+
+  const geolocationOptions = {
+    enableHighAccuracy: true,
+    timeout: 12000,
+    maximumAge: 0
+  };
+
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const telemetryData = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          altitude: position.coords.altitude || 0,
+          accuracy: position.coords.accuracy,
+          heading: position.coords.heading,
+          speed: position.coords.speed,
+          timestamp: position.timestamp
+        };
+        resolve(telemetryData);
+      },
+      (error) => {
+        let failureReason = "Error desconocido al capturar coordenadas.";
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            failureReason = "Permiso denegado por el usuario para obtener la posición geográfica.";
+            break;
+          case error.POSITION_UNAVAILABLE:
+            failureReason = "La posición satelital del sensor GNSS no se encuentra disponible.";
+            break;
+          case error.TIMEOUT:
+            failureReason = "El tiempo límite de espera para adquirir la señal de ubicación expiró.";
+            break;
+        }
+        reject(new Error(failureReason));
+      },
+      geolocationOptions
+    );
+  });
+};
+
+const calculateLocalHorizontalCoordinates = (latitude, longitude, rightAscension, declination) => {
+  const now = new Date();
+  const jd = (now.getTime() / 86400000) + 2440587.5;
+  const d = jd - 2451545.0;
+  let gmst = 280.46061837 + 360.98564736629 * d;
+  gmst = ((gmst % 360) + 360) % 360;
+
+  let lst = gmst + longitude;
+  lst = ((lst % 360) + 360) % 360;
+
+  const ha = ((lst - rightAscension) * Math.PI) / 180;
+  const latRad = (latitude * Math.PI) / 180;
+  const decRad = (declination * Math.PI) / 180;
+
+  const sinAltitude = Math.sin(decRad) * Math.sin(latRad) + Math.cos(decRad) * Math.cos(latRad) * Math.cos(ha);
+  const altitude = Math.asin(sinAltitude);
+
+  const cosAzimuth = (Math.sin(decRad) - Math.sin(altitude) * Math.sin(latRad)) / (Math.cos(altitude) * Math.cos(latRad));
+  let azimuth = Math.acos(Math.max(-1, Math.min(1, cosAzimuth)));
+
+  if (Math.sin(ha) > 0) {
+    azimuth = 2 * Math.PI - azimuth;
+  }
+
+  return {
+    altitudeDegrees: (altitude * 180) / Math.PI,
+    azimuthDegrees: (azimuth * 180) / Math.PI
+  };
+};
 
 async function loadArticles() {
   hideMessage();
@@ -202,12 +395,6 @@ async function renderJournal() {
   }
 }
 
-/**
- * Registra o envía una nota:
- * 1. Guarda siempre de forma segura en IndexedDB (persistencia local offline-first).
- * 2. Si hay conexión: intenta el envío inmediato a la API REST. Si tiene éxito, limpia de la cola y marca sincronizada.
- * 3. Si no hay conexión (o falla la red): la nota queda protegida en IndexedDB y se activa Background Sync o listener online.
- */
 async function addNote(event) {
   event.preventDefault();
   const title = $("noteTitle").value.trim();
@@ -231,12 +418,10 @@ async function addNote(event) {
     createdAt: note.createdAt
   };
 
-  // Paso 1: Guardar localmente en IndexedDB
   try {
     await CosmoDB.saveNote(note);
     await CosmoDB.addToSyncQueue(queueRecord);
   } catch (dbError) {
-    console.error("Error al persistir:", dbError);
     showMessage("No se pudo guardar: " + dbError.message, "error");
     return;
   }
@@ -245,7 +430,6 @@ async function addNote(event) {
   await renderJournal();
   await updateCounters();
 
-  // Paso 2: Evaluar si hay conexión de red
   if (navigator.onLine) {
     showMessage("Guardado. Enviando al servidor...");
     try {
@@ -259,30 +443,23 @@ async function addNote(event) {
         throw new Error(`El servidor respondió con código HTTP ${response.status}`);
       }
 
-      // Paso 3a: Envío exitoso -> Limpiar registro de la cola y marcar como sincronizado
       await CosmoDB.removeFromSyncQueue(note.id);
       await CosmoDB.markNotesAsSynced(note.id);
 
-      showMessage("Nota guardada localmente y sincronizada con éxito en el servidor.");
+      showMessage("Nota guardada localmente y sincronizada con éxito en el servidor.", "success");
       await renderJournal();
       await updateCounters();
       await loadServerRecords();
     } catch (networkError) {
-      console.warn("Fallo el envío directo al servidor:", networkError);
-      showMessage("Nota protegida. Falló el envío inmediato; se reintentará automáticamente.", "error");
+      showMessage("Nota protegida localmente. Falló el envío inmediato; se sincronizará luego.", "error");
       await requestBackgroundSync();
     }
   } else {
-    // Paso 3b: Sin conexión -> Datos seguros en IndexedDB y se activa Background Sync
     showMessage("Modo sin conexión: la nota quedó guardada. Se sincronizará automáticamente cuando vuelva internet.");
     await requestBackgroundSync();
   }
 }
 
-/**
- * Sincronización manual accionada por el botón "Sincronizar pendientes":
- * Lee todos los registros pendientes de IndexedDB y los envía al backend.
- */
 async function syncPending() {
   const queue = await CosmoDB.getSyncQueue();
   if (!queue.length) {
@@ -310,11 +487,10 @@ async function syncPending() {
     const result = await response.json();
 
     const ids = queue.map((x) => x.id);
-    // Limpiar de la cola de sincronización y actualizar estado en IndexedDB
     await CosmoDB.removeManyFromSyncQueue(ids);
     await CosmoDB.markNotesAsSynced(ids);
 
-    showMessage(`Sincronización completada. Nuevos registros: ${result.added}. Duplicados ignorados: ${result.duplicatesIgnored}.`);
+    showMessage(`Sincronización completada. Nuevos registros: ${result.added}. Duplicados ignorados: ${result.duplicatesIgnored}.`, "success");
     await renderJournal();
     await updateCounters();
     await loadServerRecords();
@@ -327,16 +503,12 @@ async function syncPending() {
   }
 }
 
-/**
- * Solicita al Service Worker registrar una tarea de Background Sync
- */
 async function requestBackgroundSync() {
   if ("serviceWorker" in navigator && "SyncManager" in window) {
     try {
       const reg = await navigator.serviceWorker.ready;
       await reg.sync.register("sync-notes");
     } catch (err) {
-      console.warn("[App] No se pudo registrar Background Sync:", err);
     }
   }
 }
@@ -371,7 +543,6 @@ async function setView(view) {
   await renderView();
 }
 
-// Migración de datos existentes en localStorage hacia IndexedDB
 async function migrateLegacyLocalStorage() {
   try {
     const oldNotes = safeRead(NOTES_KEY, []);
@@ -391,26 +562,77 @@ async function migrateLegacyLocalStorage() {
       localStorage.removeItem(QUEUE_KEY);
     }
   } catch (err) {
-    console.warn("Aviso durante la migración de localStorage a IndexedDB:", err);
   }
 }
 
-// Event Listeners de la interfaz
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
 $("refreshBtn").addEventListener("click", loadArticles);
 $("noteForm").addEventListener("submit", addNote);
 $("syncBtn").addEventListener("click", syncPending);
 $("loadServerBtn").addEventListener("click", loadServerRecords);
 
-// Escuchar cambios de conectividad
+const btnLocateStars = $("btnLocateStars");
+if (btnLocateStars) {
+  btnLocateStars.addEventListener("click", async () => {
+    btnLocateStars.disabled = true;
+    showMessage("Calibrando sensores astronómicos del dispositivo...", "info");
+
+    try {
+      const position = await getCelestialObserverPosition();
+      const coordsText = `Latitud: ${position.latitude.toFixed(4)}° | Longitud: ${position.longitude.toFixed(4)}° | Precisión: ±${Math.round(position.accuracy)}m`;
+      $("observerCoordinates").textContent = coordsText;
+
+      const vegaCoordinates = calculateLocalHorizontalCoordinates(
+        position.latitude,
+        position.longitude,
+        279.234,
+        38.783
+      );
+
+      $("targetStarCoords").innerHTML = `<strong>Astro de referencia (Vega):</strong> Azimut: ${vegaCoordinates.azimuthDegrees.toFixed(2)}° | Elevación: ${vegaCoordinates.altitudeDegrees.toFixed(2)}°`;
+      $("telemetryStatus").classList.remove("hidden");
+
+      await triggerAstronomicalNotification({
+        id: "vega-lock",
+        title: "Bóveda Celeste Calibrada",
+        description: `Vega localizada a ${vegaCoordinates.altitudeDegrees.toFixed(1)}° sobre el horizonte local.`,
+        detailsUrl: "#inicio"
+      });
+
+      showMessage("Mapa estelar orientado con éxito según tu posición.", "success");
+    } catch (error) {
+      showMessage(error.message, "error");
+    } finally {
+      btnLocateStars.disabled = false;
+    }
+  });
+}
+
+const btnSubscribeAlerts = $("btnSubscribeAlerts");
+if (btnSubscribeAlerts) {
+  btnSubscribeAlerts.addEventListener("click", async () => {
+    btnSubscribeAlerts.disabled = true;
+    showMessage("Estableciendo enlace de suscripción a eventos espaciales...", "info");
+
+    try {
+      await subscribeToAstronomicalAlerts(VAPID_PUBLIC_KEY);
+      showMessage("Alertas de eventos astronómicos activadas correctamente.", "success");
+    } catch (error) {
+      showMessage(error.message, "error");
+    } finally {
+      btnSubscribeAlerts.disabled = false;
+    }
+  });
+}
+
 window.addEventListener("online", async () => {
   updateConnection();
   const pending = await CosmoDB.countPending();
   if (pending > 0) {
-    showMessage(`Conexión recuperada. Sincronizando ${pending} registro(s) pendientes de IndexedDB...`);
+    showMessage(`Conexión recuperada. Sincronizando ${pending} registro(s) pendientes de IndexedDB...`, "info");
     await syncPending();
   } else {
-    showMessage("Conexión recuperada.");
+    showMessage("Conexión recuperada.", "success");
   }
   await loadArticles();
 });
@@ -420,11 +642,10 @@ window.addEventListener("offline", () => {
   showMessage("Sin conexión. Puedes consultar contenido guardado y crear notas (se guardarán en IndexedDB).", "error");
 });
 
-// Escuchar mensajes del Service Worker cuando ejecute sincronización en segundo plano
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", async (event) => {
     if (event.data && event.data.type === "SYNC_COMPLETED") {
-      showMessage(`Sincronización en segundo plano completada (${event.data.count} nuevo(s) registro(s)).`);
+      showMessage(`Sincronización en segundo plano completada (${event.data.count} nuevo(s) registro(s)).`, "success");
       await renderJournal();
       await updateCounters();
       await loadServerRecords();
@@ -434,16 +655,11 @@ if ("serviceWorker" in navigator) {
 
 async function boot() {
   updateConnection();
-
-  // Asegurar persistencia y migrar registros previos a IndexedDB
   await migrateLegacyLocalStorage();
 
-  if ("serviceWorker" in navigator) {
-    try {
-      await navigator.serviceWorker.register("/service-worker.js");
-    } catch (error) {
-      console.error("No se pudo registrar el Service Worker", error);
-    }
+  try {
+    await registerServiceWorker();
+  } catch (error) {
   }
 
   await loadArticles();

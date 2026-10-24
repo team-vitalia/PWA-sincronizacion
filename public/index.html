@@ -31,7 +31,18 @@
           <p class="eyebrow">BITÁCORA DE EXPLORACIÓN</p>
           <h1>El universo<br><span>está más cerca.</span></h1>
           <p>Descubre misiones, lanzamientos y hallazgos espaciales. Guarda lo que te inspire y consúltalo después.</p>
-          <button id="refreshBtn" class="button button-light">↻ Actualizar noticias</button>
+          <div class="hero-actions">
+            <button id="refreshBtn" class="button button-light">↻ Actualizar noticias</button>
+            <button id="btnLocateStars" class="button button-outline">✧ Localizar constelaciones</button>
+            <button id="btnSubscribeAlerts" class="button button-outline">✦ Activar alertas espaciales</button>
+          </div>
+          <div id="telemetryStatus" class="telemetry-status hidden" role="status" aria-live="polite">
+            <div class="telemetry-card">
+              <h4>Horizonte de Observación</h4>
+              <p id="observerCoordinates">Sin calibración</p>
+              <div id="targetStarCoords"></div>
+            </div>
+          </div>
         </div>
         <div class="orbit-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="big-planet"></div><i class="star star-one">✦</i><i class="star star-two">✧</i><i class="star star-three">·</i></div>
       </section>

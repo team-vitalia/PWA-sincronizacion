@@ -53,6 +53,14 @@ app.post("/api/sync", (req, res) => {
   res.json({ ok: true, received: incoming.length, added: added.length, duplicatesIgnored: duplicates, total: records.length });
 });
 
+app.post("/api/subscribe", (req, res) => {
+  const subscription = req.body;
+  if (!subscription || !subscription.endpoint) {
+    return res.status(400).json({ error: "Suscripción inválida." });
+  }
+  res.json({ ok: true, message: "Suscripción registrada exitosamente." });
+});
+
 app.get("/api/sync", (_req, res) => res.json({ records: readRecords() }));
 
 app.listen(PORT, () => console.log(`ExploraPWA disponible en http://localhost:${PORT}`));
