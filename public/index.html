@@ -4,18 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#10233f">
-  <meta name="description" content="Explora el universo con noticias espaciales, favoritos y funciones sin conexión.">
+  <meta name="description" content="Explora el universo con noticias espaciales, análisis de espectro y bitácora sin conexión.">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
-  <title>CosmoBitácora | ExploraPWA</title>
+  <title>CosmoBitácora | Estación Óptica PWA</title>
 </head>
 <body>
   <section id="splash" class="splash" aria-label="Pantalla de carga">
     <div class="planet"><span></span></div>
-    <p class="eyebrow">TU VENTANA AL UNIVERSO</p>
+    <p class="eyebrow">ESTACIÓN DE ANÁLISIS ÓPTICO</p>
     <h1>Cosmo<span>Bitácora</span></h1>
-    <p class="splash-copy">Historias del espacio, incluso sin conexión.</p>
+    <p class="splash-copy">Captura fotográfica de muestras y registro sin conexión.</p>
     <div class="loader" aria-label="Cargando"></div>
   </section>
 
@@ -28,10 +28,37 @@
     <main>
       <section class="hero" id="inicio">
         <div class="hero-copy">
-          <p class="eyebrow">BITÁCORA DE EXPLORACIÓN</p>
+          <p class="eyebrow">BITÁCORA DE EXPLORACIÓN ÓPTICA</p>
           <h1>El universo<br><span>está más cerca.</span></h1>
-          <p>Descubre misiones, lanzamientos y hallazgos espaciales. Guarda lo que te inspire y consúltalo después.</p>
-          <button id="refreshBtn" class="button button-light">↻ Actualizar noticias</button>
+          <p>Descubre misiones espaciales, captura evidencias fotográficas de campo y registra notas con sincronización offline.</p>
+          
+          <div class="hero-actions">
+            <button id="refreshBtn" class="button button-light">↻ Actualizar noticias</button>
+            <button id="btnOpenCamera" class="button button-outline">📷 Abrir Cámara en Vivo</button>
+            <button id="btnHapticTest" class="button button-outline">💡 Medir Fotometría (Lux)</button>
+          </div>
+
+          <!-- Tarjeta de resultados fotométricos (Lux) -->
+          <div id="luxResultCard" class="sensor-card hidden">
+            <h4>Lectura de Fotómetro Óptico</h4>
+            <p id="luxValueDisplay">Lux: -- lx</p>
+            <small id="luxStatusDisplay">Esperando medición...</small>
+          </div>
+
+          <!-- Visor de la cámara -->
+          <div id="cameraPanel" class="camera-panel hidden">
+            <h4>Visor de Captura de Muestra en Vivo</h4>
+            <video id="videoPreview" autoplay playsinline muted></video>
+            <div class="camera-controls">
+              <button id="btnTakePhoto" class="button button-primary">📸 Tomar Foto y Analizar</button>
+              <button id="btnCloseCamera" class="button button-light">Cerrar Cámara</button>
+            </div>
+            <canvas id="photoCanvas" class="hidden"></canvas>
+            <div id="photoPreviewCard" class="hidden">
+              <img id="capturedImage" alt="Muestra capturada">
+              <p id="sampleAnalysis">Muestra lista para adjuntar a la bitácora.</p>
+            </div>
+          </div>
         </div>
         <div class="orbit-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="big-planet"></div><i class="star star-one">✦</i><i class="star star-two">✧</i><i class="star star-three">·</i></div>
       </section>
@@ -49,12 +76,13 @@
         </div>
         <div id="message" class="message hidden"></div>
         <div id="newsGrid" class="news-grid" aria-live="polite"></div>
+
         <div id="journalPanel" class="journal-panel hidden">
           <div class="form-card">
             <h3>Agregar una nota a tu bitácora</h3>
             <p>La nota se guarda primero en este dispositivo. Cuando vuelva internet, podrás sincronizarla con el servidor.</p>
             <form id="noteForm">
-              <label for="noteTitle">Título</label><input id="noteTitle" maxlength="180" required placeholder="Ej. Misión que quiero investigar">
+              <label for="noteTitle">Título</label><input id="noteTitle" maxlength="180" required placeholder="Ej. Observación de bólido con captura">
               <label for="noteDetail">Nota</label><textarea id="noteDetail" maxlength="2000" rows="4" placeholder="Escribe tus observaciones…"></textarea>
               <button class="button button-primary" type="submit">Guardar nota sin conexión</button>
             </form>

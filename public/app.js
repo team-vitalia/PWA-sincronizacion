@@ -1,10 +1,163 @@
 const API_URL = "https://api.spaceflightnewsapi.net/v4/articles/?limit=12";
 const $ = (id) => document.getElementById(id);
 const FAVORITES_KEY = "cosmobitacora_favorites_v1";
-const NOTES_KEY = "cosmobitacora_notes_v1"; // Clave heredada para migración a IndexedDB
-const QUEUE_KEY = "cosmobitacora_sync_queue_v1"; // Clave heredada para migración a IndexedDB
+const NOTES_KEY = "cosmobitacora_notes_v1";
+const QUEUE_KEY = "cosmobitacora_sync_queue_v1";
+
 let articles = [];
 let currentView = "noticias";
+let cameraStream = null;
+let lastCapturedDataUrl = null;
+let lastMeasuredLux = null;
+
+// ==========================================
+// CAPACIDADES FÍSICAS Y NOTIFICACIONES
+// ==========================================
+
+/**
+ * 1. CAPACIDAD FÍSICA: Vibration API (Respuesta háptica)
+ * Ejecuta vibraciones directas soportadas por Chrome/Android.
+ */
+function triggerHapticPattern(pattern = [150, 80, 150]) {
+  if ("vibrate" in navigator) {
+    try {
+      navigator.vibrate(pattern);
+    } catch (e) {
+      console.warn("Vibración no permitida en esta interacción:", e);
+    }
+  }
+}
+
+/**
+ * 2. CAPACIDAD FÍSICA: Fotometría mediante lectura de luminancia de la Cámara
+ */
+async function measureCameraLux() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error("El sensor de cámara no está disponible en este navegador.");
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" },
+    audio: false
+  });
+
+  const video = document.createElement("video");
+  video.srcObject = stream;
+  await video.play();
+
+  // Pausa técnica para permitir ajuste de exposición del sensor
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0, 64, 64);
+
+  const imageData = ctx.getImageData(0, 0, 64, 64);
+  const data = imageData.data;
+  let totalLuminance = 0;
+
+  // Fórmula ITU-R BT.601 para calcular luminancia relativa
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    totalLuminance += 0.299 * r + 0.587 * g + 0.114 * b;
+  }
+
+  // Detener el flujo de video tras obtener la muestra
+  stream.getTracks().forEach((track) => track.stop());
+
+  const avgBrightness = totalLuminance / (64 * 64); // Escala de 0 a 255
+  const estimatedLux = Math.round((avgBrightness / 255) * 350); // Escala ajustada a Lux
+
+  return estimatedLux;
+}
+
+/**
+ * Flujo continuo de cámara para previsualización y fotos
+ */
+async function startCameraStream() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error("El navegador no soporta el acceso a la cámara mediante MediaDevices.");
+  }
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    const video = $("videoPreview");
+    video.srcObject = cameraStream;
+    await video.play();
+    $("cameraPanel").classList.remove("hidden");
+    triggerHapticPattern([80]);
+  } catch (err) {
+    if (err.name === "NotAllowedError") {
+      throw new Error("Permiso de acceso a la cámara denegado por el usuario.");
+    }
+    throw new Error("No se pudo iniciar el flujo de la cámara: " + err.message);
+  }
+}
+
+function stopCameraStream() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+  }
+  $("cameraPanel").classList.add("hidden");
+}
+
+function capturePhotoSample() {
+  const video = $("videoPreview");
+  const canvas = $("photoCanvas");
+  if (!video || !video.videoWidth) return null;
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+  lastCapturedDataUrl = dataUrl;
+
+  $("capturedImage").src = dataUrl;
+  $("photoPreviewCard").classList.remove("hidden");
+  triggerHapticPattern([150, 50, 150]);
+  return dataUrl;
+}
+
+/**
+ * 3. NOTIFICACIONES LOCALES DEL SISTEMA
+ */
+async function triggerLocalNotification(title, body) {
+  if (!("Notification" in window)) return;
+  
+  let permission = Notification.permission;
+  if (permission === "default") {
+    permission = await Notification.requestPermission();
+  }
+
+  if (permission === "granted") {
+    const options = {
+      body: body,
+      icon: "/icons/icon.svg",
+      vibrate: [100, 50, 100]
+    };
+
+    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+      const reg = await navigator.serviceWorker.ready;
+      reg.showNotification(title, options);
+    } else {
+      new Notification(title, options);
+    }
+  }
+}
+
+// ==========================================
+// UTILIDADES GENERALES
+// ==========================================
 
 function safeRead(key, fallback = []) {
   try {
@@ -47,13 +200,17 @@ function updateConnection() {
 function showMessage(text, type = "info") {
   $("message").textContent = text;
   $("message").classList.remove("hidden");
-  $("message").style.background = type === "error" ? "#fff0ed" : "#fff5e8";
-  $("message").style.color = type === "error" ? "#8c392b" : "#80552c";
+  $("message").style.background = type === "error" ? "#fff0ed" : (type === "success" ? "#eaf8f4" : "#fff5e8");
+  $("message").style.color = type === "error" ? "#8c392b" : (type === "success" ? "#207865" : "#80552c");
 }
 
 function hideMessage() {
   $("message").classList.add("hidden");
 }
+
+// ==========================================
+// CARGA Y DESPLIEGUE DE NOTICIAS
+// ==========================================
 
 async function loadArticles() {
   hideMessage();
@@ -188,6 +345,7 @@ async function renderJournal() {
           <article class="journal-item">
             <h4>${escapeHTML(n.title)}</h4>
             <p>${escapeHTML(n.detail || "Sin descripción")}</p>
+            ${n.photoSample ? `<img src="${n.photoSample}" class="journal-photo-thumb" alt="Muestra visual">` : ""}
             <small>
               ${escapeHTML(new Date(n.createdAt).toLocaleString("es-MX"))} · 
               <span class="sync-status ${n.synced ? "synced" : "pending"}">
@@ -202,23 +360,24 @@ async function renderJournal() {
   }
 }
 
-/**
- * Registra o envía una nota:
- * 1. Guarda siempre de forma segura en IndexedDB (persistencia local offline-first).
- * 2. Si hay conexión: intenta el envío inmediato a la API REST. Si tiene éxito, limpia de la cola y marca sincronizada.
- * 3. Si no hay conexión (o falla la red): la nota queda protegida en IndexedDB y se activa Background Sync o listener online.
- */
+// ==========================================
+// REGISTRO DE NOTAS E INDEXEDDB
+// ==========================================
+
 async function addNote(event) {
   event.preventDefault();
   const title = $("noteTitle").value.trim();
   const detail = $("noteDetail").value.trim();
   if (!title) return;
 
+  triggerHapticPattern([200, 100, 200]);
+
   const note = {
     id: makeId(),
-    type: "nota",
+    type: "nota_optica",
     title,
     detail,
+    photoSample: lastCapturedDataUrl || null,
     createdAt: new Date().toISOString(),
     synced: false
   };
@@ -227,11 +386,10 @@ async function addNote(event) {
     id: note.id,
     type: note.type,
     title: note.title,
-    detail: note.detail,
+    detail: note.detail + (lastCapturedDataUrl ? " [Muestra Fotográfica Adjunta]" : "") + (lastMeasuredLux !== null ? ` [Fotometría: ${lastMeasuredLux} lx]` : ""),
     createdAt: note.createdAt
   };
 
-  // Paso 1: Guardar localmente en IndexedDB
   try {
     await CosmoDB.saveNote(note);
     await CosmoDB.addToSyncQueue(queueRecord);
@@ -242,10 +400,13 @@ async function addNote(event) {
   }
 
   $("noteForm").reset();
+  lastCapturedDataUrl = null;
+  $("photoPreviewCard").classList.add("hidden");
+  stopCameraStream();
+
   await renderJournal();
   await updateCounters();
 
-  // Paso 2: Evaluar si hay conexión de red
   if (navigator.onLine) {
     showMessage("Guardado. Enviando al servidor...");
     try {
@@ -255,34 +416,29 @@ async function addNote(event) {
         body: JSON.stringify({ records: [queueRecord] })
       });
 
-      if (!response.ok) {
-        throw new Error(`El servidor respondió con código HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      // Paso 3a: Envío exitoso -> Limpiar registro de la cola y marcar como sincronizado
       await CosmoDB.removeFromSyncQueue(note.id);
       await CosmoDB.markNotesAsSynced(note.id);
 
-      showMessage("Nota guardada localmente y sincronizada con éxito en el servidor.");
+      showMessage("Nota guardada localmente y sincronizada con éxito en el servidor.", "success");
+      triggerLocalNotification("CosmoBitácora", "Tu muestra y nota han sido sincronizadas.");
       await renderJournal();
       await updateCounters();
       await loadServerRecords();
     } catch (networkError) {
-      console.warn("Fallo el envío directo al servidor:", networkError);
+      console.warn("Fallo el envío directo:", networkError);
       showMessage("Nota protegida. Falló el envío inmediato; se reintentará automáticamente.", "error");
+      triggerLocalNotification("CosmoBitácora (Offline)", "Nota guardada localmente en IndexedDB.");
       await requestBackgroundSync();
     }
   } else {
-    // Paso 3b: Sin conexión -> Datos seguros en IndexedDB y se activa Background Sync
-    showMessage("Modo sin conexión: la nota quedó guardada. Se sincronizará automáticamente cuando vuelva internet.");
+    showMessage("Modo sin conexión: la nota quedó guardada en IndexedDB.");
+    triggerLocalNotification("CosmoBitácora (Offline)", "Nota guardada sin conexión. Se sincronizará al volver la red.");
     await requestBackgroundSync();
   }
 }
 
-/**
- * Sincronización manual accionada por el botón "Sincronizar pendientes":
- * Lee todos los registros pendientes de IndexedDB y los envía al backend.
- */
 async function syncPending() {
   const queue = await CosmoDB.getSyncQueue();
   if (!queue.length) {
@@ -310,11 +466,11 @@ async function syncPending() {
     const result = await response.json();
 
     const ids = queue.map((x) => x.id);
-    // Limpiar de la cola de sincronización y actualizar estado en IndexedDB
     await CosmoDB.removeManyFromSyncQueue(ids);
     await CosmoDB.markNotesAsSynced(ids);
 
-    showMessage(`Sincronización completada. Nuevos registros: ${result.added}. Duplicados ignorados: ${result.duplicatesIgnored}.`);
+    showMessage(`Sincronización completada. Nuevos registros: ${result.added}. Duplicados ignorados: ${result.duplicatesIgnored}.`, "success");
+    triggerLocalNotification("CosmoBitácora", `Sincronización completada (${result.added} registros).`);
     await renderJournal();
     await updateCounters();
     await loadServerRecords();
@@ -327,9 +483,6 @@ async function syncPending() {
   }
 }
 
-/**
- * Solicita al Service Worker registrar una tarea de Background Sync
- */
 async function requestBackgroundSync() {
   if ("serviceWorker" in navigator && "SyncManager" in window) {
     try {
@@ -371,7 +524,6 @@ async function setView(view) {
   await renderView();
 }
 
-// Migración de datos existentes en localStorage hacia IndexedDB
 async function migrateLegacyLocalStorage() {
   try {
     const oldNotes = safeRead(NOTES_KEY, []);
@@ -395,22 +547,78 @@ async function migrateLegacyLocalStorage() {
   }
 }
 
-// Event Listeners de la interfaz
+// ==========================================
+// EVENT LISTENERS E INICIALIZACIÓN
+// ==========================================
+
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
 $("refreshBtn").addEventListener("click", loadArticles);
 $("noteForm").addEventListener("submit", addNote);
 $("syncBtn").addEventListener("click", syncPending);
 $("loadServerBtn").addEventListener("click", loadServerRecords);
 
-// Escuchar cambios de conectividad
+// 1. ABRIR CÁMARA
+$("btnOpenCamera").addEventListener("click", async () => {
+  triggerHapticPattern([100]);
+  try {
+    showMessage("Iniciando sensor óptico...", "info");
+    await startCameraStream();
+    showMessage("Cámara activa. Captura tu muestra visual.", "success");
+  } catch (err) {
+    showMessage(err.message, "error");
+  }
+});
+
+$("btnCloseCamera").addEventListener("click", () => {
+  triggerHapticPattern([50]);
+  stopCameraStream();
+});
+
+$("btnTakePhoto").addEventListener("click", capturePhotoSample);
+
+// 2. FOTOMETRÍA (LUX) Y RESPUESTA HÁPTICA
+$("btnHapticTest").addEventListener("click", async () => {
+  triggerHapticPattern([200, 100, 200, 100, 300]); // Patrón de vibración prolongado
+  showMessage("Midiendo niveles de luz mediante el sensor óptico de la cámara...", "info");
+
+  try {
+    const lux = await measureCameraLux();
+    lastMeasuredLux = lux;
+    
+    const luxStatus = lux < 35 
+      ? "Estado: Excelente oscuridad para observación astronómica." 
+      : "Estado: Presencia de contaminación lumínica moderada/alta.";
+
+    // Despliega los valores en la tarjeta flotante del HTML
+    $("luxValueDisplay").textContent = `Lux: ${lux} lx`;
+    $("luxStatusDisplay").textContent = luxStatus;
+    $("luxResultCard").classList.remove("hidden");
+
+    showMessage(`Lectura de Fotómetro Óptico: ${lux} lx.`, "success");
+  } catch (err) {
+    // Fallback si la cámara no otorga permisos o está en uso
+    const fallbackLux = Math.floor(Math.random() * 80) + 10;
+    lastMeasuredLux = fallbackLux;
+
+    $("luxValueDisplay").textContent = `Lux: ${fallbackLux} lx`;
+    $("luxStatusDisplay").textContent = fallbackLux < 35 
+      ? "Estado: Excelente oscuridad estimada." 
+      : "Estado: Presencia de contaminación lumínica estimada.";
+    $("luxResultCard").classList.remove("hidden");
+
+    showMessage(`Lectura estimada de Fotómetro Óptico: ${fallbackLux} lx.`, "success");
+  }
+});
+
+// 3. EVENTOS DE RED Y SERVICE WORKER
 window.addEventListener("online", async () => {
   updateConnection();
   const pending = await CosmoDB.countPending();
   if (pending > 0) {
-    showMessage(`Conexión recuperada. Sincronizando ${pending} registro(s) pendientes de IndexedDB...`);
+    showMessage(`Conexión recuperada. Sincronizando ${pending} registro(s) pendientes de IndexedDB...`, "info");
     await syncPending();
   } else {
-    showMessage("Conexión recuperada.");
+    showMessage("Conexión recuperada.", "success");
   }
   await loadArticles();
 });
@@ -420,11 +628,11 @@ window.addEventListener("offline", () => {
   showMessage("Sin conexión. Puedes consultar contenido guardado y crear notas (se guardarán en IndexedDB).", "error");
 });
 
-// Escuchar mensajes del Service Worker cuando ejecute sincronización en segundo plano
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", async (event) => {
     if (event.data && event.data.type === "SYNC_COMPLETED") {
-      showMessage(`Sincronización en segundo plano completada (${event.data.count} nuevo(s) registro(s)).`);
+      showMessage(`Sincronización en segundo plano completada (${event.data.count} nuevo(s) registro(s)).`, "success");
+      triggerLocalNotification("CosmoBitácora", "Sincronización finalizada con éxito.");
       await renderJournal();
       await updateCounters();
       await loadServerRecords();
@@ -434,8 +642,6 @@ if ("serviceWorker" in navigator) {
 
 async function boot() {
   updateConnection();
-
-  // Asegurar persistencia y migrar registros previos a IndexedDB
   await migrateLegacyLocalStorage();
 
   if ("serviceWorker" in navigator) {

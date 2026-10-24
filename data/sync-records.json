@@ -62,5 +62,61 @@
     "detail": "HJGHJSGGSgevgyucgeu",
     "createdAt": "2026-10-17T15:39:44.931Z",
     "syncedAt": "2026-10-17T15:39:44.959Z"
+  },
+  {
+    "id": "c30269ef-9039-400d-afdf-c3f4cd34995c",
+    "type": "nota_fotometria",
+    "title": "Jdjd",
+    "detail": "Ndjdj [Fotometría: 79 lx]",
+    "createdAt": "2026-10-24T18:06:57.307Z",
+    "syncedAt": "2026-10-24T18:06:59.271Z"
+  },
+  {
+    "id": "4a978043-03e0-42f5-bd66-d18f0890db87",
+    "type": "nota_optica",
+    "title": "Jjj",
+    "detail": "Jjj [Muestra Fotográfica Adjunta]",
+    "createdAt": "2026-10-24T18:11:20.304Z",
+    "syncedAt": "2026-10-24T18:11:20.956Z"
+  },
+  {
+    "id": "83ee9f03-3d45-412b-ae4e-d3e31806c048",
+    "type": "nota_optica",
+    "title": "Hj",
+    "detail": "Hj",
+    "createdAt": "2026-10-24T18:11:52.225Z",
+    "syncedAt": "2026-10-24T18:11:52.761Z"
+  },
+  {
+    "id": "2eb50c06-e6c3-44fa-a8df-5f5e22dd3676",
+    "type": "nota",
+    "title": "l",
+    "detail": "l",
+    "createdAt": "2026-10-24T17:26:20.810Z",
+    "syncedAt": "2026-10-24T18:12:50.400Z"
+  },
+  {
+    "id": "6e42cbb3-25cf-4548-be99-773f0877d45d",
+    "type": "nota",
+    "title": "l",
+    "detail": "l",
+    "createdAt": "2026-10-24T17:23:42.714Z",
+    "syncedAt": "2026-10-24T18:12:50.400Z"
+  },
+  {
+    "id": "e777f0a0-31cc-4da9-be31-27a16ce23b0c",
+    "type": "nota",
+    "title": "qwe",
+    "detail": "qwe",
+    "createdAt": "2026-10-24T17:29:35.530Z",
+    "syncedAt": "2026-10-24T18:12:50.400Z"
+  },
+  {
+    "id": "81222b36-2a6c-4f34-9024-77d0a2155d98",
+    "type": "nota_optica",
+    "title": "Gr",
+    "detail": "Gg [Muestra Fotográfica Adjunta] [Fotometría: 0 lx]",
+    "createdAt": "2026-10-24T18:22:11.792Z",
+    "syncedAt": "2026-10-24T18:22:13.109Z"
   }
 ]

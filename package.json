@@ -1,12 +1,17 @@
 {
+  "homepage": "https://github.io",
   "name": "explora-pwa",
   "version": "1.0.0",
   "private": true,
   "description": "PWA de exploración espacial con API externa, modo offline y sincronización local con backend",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "deploy": "gh-pages -d public"
   },
   "dependencies": {
     "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.3.0"
   }
 }

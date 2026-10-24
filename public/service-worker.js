@@ -16,6 +16,7 @@ const APP_SHELL = [
   "/icons/icon.svg"
 ];
 
+// 1. Instalación: Guardar recursos estáticos del App Shell
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -24,6 +25,7 @@ self.addEventListener("install", (event) => {
   );
 });
 
+// 2. Activación: Limpieza de cachés obsoletas
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
@@ -34,11 +36,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// 3. Estrategia de Caché: Network First con fallback a Cache
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET") return;
 
-  // API externa y API local de sincronización no se interceptan en caché de navegación estática
+  // No interceptar peticiones a la API externa de noticias ni endpoints REST locales
   if (url.hostname === "api.spaceflightnewsapi.net") return;
   if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) return;
 
@@ -98,15 +101,13 @@ async function syncPendingNotes() {
     const result = await response.json();
     const ids = queue.map((item) => item.id);
 
-    // 1. Limpiar registros de la cola en IndexedDB
+    // Limpiar cola y marcar sincronizados en IndexedDB
     await self.CosmoDB.removeManyFromSyncQueue(ids);
-
-    // 2. Marcar las notas correspondientes como sincronizadas en IndexedDB
     await self.CosmoDB.markNotesAsSynced(ids);
 
     console.log(`[SW] Sincronización exitosa: ${ids.length} registros procesados.`);
 
-    // 3. Notificar a las ventanas abiertas para refrescar la interfaz sin recargar
+    // Notificar a la app para refrescar la interfaz
     const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const client of clients) {
       client.postMessage({
@@ -118,7 +119,25 @@ async function syncPendingNotes() {
     }
   } catch (error) {
     console.error("[SW] Error durante Background Sync:", error);
-    // Relanzar el error le indica al Background Sync que vuelva a intentar más tarde con backoff
     throw error;
   }
 }
+
+// ==========================================
+// EVENTOS DE NOTIFICACIONES
+// ==========================================
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url === "/" && "focus" in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow("/");
+      }
+    })
+  );
+});
