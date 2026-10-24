@@ -241,6 +241,10 @@ async function addNote(event) {
     return;
   }
 
+  // Notificar después de confirmar que la nota quedó guardada.
+  await notifyNoteSavedLocally(note.title);
+
+
   $("noteForm").reset();
   await renderJournal();
   await updateCounters();
@@ -395,12 +399,278 @@ async function migrateLegacyLocalStorage() {
   }
 }
 
+
+/* ACTIVIDAD 10: NOTIFICACIÓN LOCAL AL GUARDAR UNA NOTA */
+
+async function notifyNoteSavedLocally(title) {
+  // Solo mostrarla si el usuario ya concedió el permiso.
+  if (
+    !("Notification" in window) ||
+    Notification.permission !== "granted" ||
+    !("serviceWorker" in navigator)
+  ) {
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+
+    await registration.showNotification(
+      "Nota guardada en CosmoBitácora",
+      {
+        body: `La nota "${title}" se guardó en este dispositivo.`,
+        icon: "/icons/icon.svg",
+        badge: "/icons/icon.svg",
+        tag: `nota-local-${Date.now()}`,
+        data: {
+          url: "/"
+        }
+      }
+    );
+  } catch (error) {
+    // Un error de notificación no debe impedir guardar la nota.
+    console.warn(
+      "[Notificación local] No se pudo mostrar:",
+      error
+    );
+  }
+}
+
+/* ACTIVIDAD 10: NOTIFICACIONES LOCALES */
+
+async function activateNotification() {
+  const message = document.getElementById("deviceMessage");
+
+  if (!("Notification" in window)) {
+    message.textContent =
+      "Este navegador no admite la API de notificaciones.";
+    return;
+  }
+
+  if (!("serviceWorker" in navigator)) {
+    message.textContent =
+      "Este navegador no admite Service Workers.";
+    return;
+  }
+
+  try {
+    let permission = Notification.permission;
+
+    // Solicitar permiso únicamente después de pulsar el botón.
+    if (permission === "default") {
+      permission = await Notification.requestPermission();
+    }
+
+    if (permission !== "granted") {
+      message.textContent =
+        "No se concedió el permiso. Puedes habilitarlo en la configuración del navegador.";
+      return;
+    }
+
+    const registration = await navigator.serviceWorker.ready;
+
+    await registration.showNotification("CosmoBitácora", {
+      body: "¡Es un buen momento para registrar tus descubrimientos espaciales!",
+      icon: "/icons/icon.svg",
+      tag: "cosmobitacora-recordatorio",
+      data: {
+        url: "/"
+      }
+    });
+
+    message.textContent =
+      "Notificación enviada al navegador correctamente.";
+  } catch (error) {
+    console.error("Error al mostrar la notificación:", error);
+    message.textContent =
+      "No se pudo mostrar la notificación. Revisa los permisos y la compatibilidad del navegador.";
+  }
+}
+
+
+/* ACTIVIDAD 10: GEOLOCALIZACIÓN */
+
+function getDeviceLocation() {
+  const message = document.getElementById("deviceMessage");
+  const result = document.getElementById("locationResult");
+
+  if (!("geolocation" in navigator)) {
+    message.textContent =
+      "Este navegador no admite la API de geolocalización.";
+    return;
+  }
+
+  message.textContent =
+    "Solicitando permiso para consultar tu ubicación...";
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const latitude = position.coords.latitude;
+      const longitude = position.coords.longitude;
+      const accuracy = position.coords.accuracy;
+
+      document.getElementById("latitudeValue").textContent =
+        latitude.toFixed(6);
+
+      document.getElementById("longitudeValue").textContent =
+        longitude.toFixed(6);
+
+      document.getElementById("accuracyValue").textContent =
+        Math.round(accuracy);
+
+      result.classList.remove("hidden");
+
+      message.textContent =
+        "Ubicación obtenida correctamente. El navegador proporcionó permiso.";
+    },
+    (error) => {
+      result.classList.add("hidden");
+
+      const errors = {
+        1: "Permiso de ubicación denegado.",
+        2: "La ubicación no está disponible.",
+        3: "Se agotó el tiempo de espera para obtener la ubicación."
+      };
+
+      message.textContent =
+        errors[error.code] || "No se pudo obtener la ubicación.";
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    }
+  );
+}
+
+
+/* ACTIVIDAD 10: SUSCRIPCIÓN A NOTIFICACIONES PUSH */
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+
+  const raw = window.atob(base64);
+  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+}
+
+async function subscribeToPush() {
+  const message = $("deviceMessage");
+
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    message.textContent =
+      "Este navegador no admite notificaciones push.";
+    return;
+  }
+
+  if (!("Notification" in window)) {
+    message.textContent =
+      "Este navegador no admite la API Notification.";
+    return;
+  }
+
+  if (!window.isSecureContext) {
+    message.textContent =
+      "Las notificaciones push requieren HTTPS o localhost.";
+    return;
+  }
+
+  try {
+    let permission = Notification.permission;
+
+    if (permission === "default") {
+      permission = await Notification.requestPermission();
+    }
+
+    if (permission !== "granted") {
+      message.textContent =
+        "No se autorizó el envío de notificaciones.";
+      return;
+    }
+
+    const keyResponse = await fetch("/api/push/public-key");
+
+    if (!keyResponse.ok) {
+      throw new Error("No se pudo obtener la clave pública VAPID.");
+    }
+
+    const { publicKey } = await keyResponse.json();
+    const registration = await navigator.serviceWorker.ready;
+
+    let subscription = await registration.pushManager.getSubscription();
+
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+    }
+
+    const saveResponse = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(subscription)
+    });
+
+    if (!saveResponse.ok) {
+      throw new Error("No se pudo guardar la suscripción en el servidor.");
+    }
+
+    message.textContent =
+      "¡Suscripción push registrada! Ya puedes probar el envío desde el servidor.";
+  } catch (error) {
+    console.error("[Push] Error al suscribirse:", error);
+    message.textContent =
+      "Error al suscribirse: " + error.message;
+  }
+}
+
+async function sendPushTest() {
+  const message = $("deviceMessage");
+
+  if (!navigator.onLine) {
+    message.textContent =
+      "Necesitas conexión para solicitar el envío al servidor.";
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/push/test", {
+      method: "POST"
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Falló el envío.");
+    }
+
+    message.textContent = result.message;
+  } catch (error) {
+    message.textContent =
+      "No se pudo enviar la notificación: " + error.message;
+  }
+}
+
+
 // Event Listeners de la interfaz
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
 $("refreshBtn").addEventListener("click", loadArticles);
 $("noteForm").addEventListener("submit", addNote);
 $("syncBtn").addEventListener("click", syncPending);
 $("loadServerBtn").addEventListener("click", loadServerRecords);
+
+$("notificationBtn").addEventListener("click", activateNotification);
+$("locationBtn").addEventListener("click", getDeviceLocation);
+
+$("pushSubscribeBtn").addEventListener("click", subscribeToPush);
+$("pushTestBtn").addEventListener("click", sendPushTest);
+
+
 
 // Escuchar cambios de conectividad
 window.addEventListener("online", async () => {

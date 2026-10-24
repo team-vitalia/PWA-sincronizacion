@@ -42,6 +42,85 @@
         <button class="tab" data-view="bitacora">Mi bitácora <span id="pendingCount" class="count">0</span></button>
       </nav>
 
+      
+      
+      <section class="device-tools" aria-labelledby="deviceToolsTitle">
+        <div class="device-tools-heading">
+          <p class="eyebrow">FUNCIONES DEL DISPOSITIVO</p>
+          <h2 id="deviceToolsTitle">Explora desde tu dispositivo</h2>
+          <p>
+            Activa recordatorios, consulta tu ubicación y recibe notificaciones
+            push desde el servidor.
+          </p>
+        </div>
+
+        <div class="device-tools-actions">
+          <!-- Notificación local -->
+          <button
+            id="notificationBtn"
+            class="button button-primary"
+            type="button"
+          >
+            Activar notificación local
+          </button>
+
+          <!-- Geolocalización -->
+          <button
+            id="locationBtn"
+            class="button button-outline"
+            type="button"
+          >
+            Obtener mi ubicación
+          </button>
+
+          <!-- Suscripción push -->
+          <button
+            id="pushSubscribeBtn"
+            class="button button-primary"
+            type="button"
+          >
+            Suscribirme a notificaciones push
+          </button>
+
+          <!-- Enviar notificación push -->
+          <button
+            id="pushTestBtn"
+            class="button button-outline"
+            type="button"
+          >
+            Enviar push de prueba
+          </button>
+        </div>
+
+        <!-- Mensajes de estado -->
+        <p
+          id="deviceMessage"
+          class="device-message"
+          role="status"
+          aria-live="polite"
+        >
+          Selecciona una función para comenzar.
+        </p>
+
+        <!-- Resultado de geolocalización -->
+        <div id="locationResult" class="location-result hidden">
+          <p>
+            <strong>Latitud:</strong>
+            <span id="latitudeValue"></span>
+          </p>
+
+          <p>
+            <strong>Longitud:</strong>
+            <span id="longitudeValue"></span>
+          </p>
+
+          <p>
+            <strong>Precisión:</strong>
+            <span id="accuracyValue"></span> metros
+          </p>
+        </div>
+      </section>
+
       <section class="content">
         <div class="section-heading">
           <div><p class="eyebrow" id="sectionEyebrow">ACTUALIDAD ESPACIAL</p><h2 id="sectionTitle">Últimas noticias</h2></div>

@@ -5,7 +5,7 @@ try {
   console.error("[SW] Error al importar idb-helper.js:", e);
 }
 
-const CACHE_NAME = "cosmobitacora-static-v2";
+const CACHE_NAME = "cosmobitacora-static-v4";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -122,3 +122,80 @@ async function syncPendingNotes() {
     throw error;
   }
 }
+
+
+/* ACTIVIDAD 10: ACCIÓN AL PULSAR UNA NOTIFICACIÓN */
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  event.waitUntil(
+    (async () => {
+      const targetUrl = new URL(
+        event.notification.data?.url || "/",
+        self.location.origin
+      ).href;
+
+      const windows = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true
+      });
+
+      for (const client of windows) {
+        if (client.url === targetUrl && "focus" in client) {
+          await client.focus();
+          return;
+        }
+      }
+
+      if (self.clients.openWindow) {
+        await self.clients.openWindow(targetUrl);
+      }
+    })()
+  );
+});
+
+
+/* ACTIVIDAD 10: RECEPCIÓN DE NOTIFICACIONES PUSH */
+
+self.addEventListener("push", (event) => {
+  let data = {
+    title: "CosmoBitácora",
+    body: "Tienes una nueva notificación.",
+    url: "/"
+  };
+
+  if (event.data) {
+    try {
+      data = {
+        ...data,
+        ...event.data.json()
+      };
+    } catch (error) {
+      data.body = event.data.text();
+    }
+  }
+
+  const targetUrl = new URL(
+    data.url || "/",
+    self.location.origin
+  );
+
+  // Evitar que un mensaje push dirija a sitios externos.
+  if (targetUrl.origin !== self.location.origin) {
+    targetUrl.href = self.location.origin + "/";
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "/icons/icon.svg",
+      badge: "/icons/icon.svg",
+      tag: "cosmobitacora-push",
+      data: {
+        url: targetUrl.href
+      }
+    })
+  );
+});
+
