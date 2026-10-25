@@ -7,7 +7,7 @@ const webpush = require("web-push");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, "data");
+const DATA_DIR = "/tmp/cosmobiotica-data";
 const DB_FILE = path.join(DATA_DIR, "sync-records.json");
 // Crear la carpeta antes de crear los archivos de datos.
 if (!fs.existsSync(DATA_DIR)) {
