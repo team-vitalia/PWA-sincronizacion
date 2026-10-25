@@ -1,6 +1,6 @@
 // Importar helper de IndexedDB para tener acceso a la base de datos en segundo plano
 try {
-  importScripts("/idb-helper.js");
+  importScripts("idb-helper.js");
 } catch (e) {
   console.error("[SW] Error al importar idb-helper.js:", e);
 }
@@ -8,12 +8,12 @@ try {
 const CACHE_NAME = "cosmobitacora-static-v2";
 const APP_SHELL = [
   "/",
-  "/index.html",
-  "/styles.css",
-  "/idb-helper.js",
-  "/app.js",
-  "/manifest.json",
-  "/icons/icon.svg"
+  "index.html",
+  "styles.css",
+  "idb-helper.js",
+  "app.js",
+  "manifest.json",
+  "icons/icon.svg"
 ];
 
 self.addEventListener("install", (event) => {

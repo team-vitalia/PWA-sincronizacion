@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#10233f">
   <meta name="description" content="Explora el universo con noticias espaciales, favoritos y funciones sin conexión.">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
   <title>CosmoBitácora | ExploraPWA</title>
 </head>
 <body>
@@ -40,6 +40,7 @@
         <button class="tab active" data-view="noticias">Noticias</button>
         <button class="tab" data-view="favoritos">Favoritos <span id="favCount" class="count">0</span></button>
         <button class="tab" data-view="bitacora">Mi bitácora <span id="pendingCount" class="count">0</span></button>
+        <a href="dispositivo.html" class="tab-link">Plus Noticias</a>
       </nav>
 
       <section class="content">
@@ -67,7 +68,7 @@
     </main>
     <footer><span>CosmoBitácora · PWA educativa</span><span>Datos espaciales: Spaceflight News API</span></footer>
   </div>
-  <script src="/idb-helper.js" defer></script>
-  <script src="/app.js" defer></script>
+  <script src="idb-helper.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

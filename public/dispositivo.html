@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detalle de Noticia | CosmoBitácora</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Estilos para el Modal y la vista de Noticia */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(11, 26, 48, 0.8); display: flex; justify-content: center; align-items: center;
+      z-index: 1000; padding: 20px;
+    }
+    .modal-content {
+      background: white; border-radius: 16px; max-width: 600px; width: 100%;
+      max-height: 90vh; overflow-y: auto; padding: 30px; text-align: left;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3); position: relative;
+    }
+    .btn-cerrar {
+      position: absolute; top: 15px; right: 15px; background: none; border: none;
+      font-size: 1.5rem; cursor: pointer; color: #333;
+    }
+    
+    /* Navegación entre noticias */
+    .navegacion-noticias {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;
+    }
+    .btn-nav {
+      background: #f1f5f9; border: none; padding: 8px 15px; border-radius: 20px;
+      cursor: pointer; font-weight: bold; color: #0b1a30; transition: background 0.2s;
+    }
+    .btn-nav:hover { background: #e2e8f0; }
+    .btn-nav:disabled { opacity: 0.5; cursor: not-allowed; }
+    .indicador-noticia { font-size: 0.85rem; color: #64748b; font-weight: bold; }
+
+    .noticia-imagen {
+      width: 100%; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 20px;
+    }
+    .acciones-noticia {
+      display: flex; gap: 10px; flex-wrap: wrap; margin-top: 25px; padding-top: 20px;
+      border-top: 1px solid #eee;
+    }
+    .btn-accion {
+      flex: 1; min-width: 120px; padding: 12px; border: none; border-radius: 8px;
+      cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-ubicacion { background: #e0f2fe; color: #0284c7; }
+    .btn-camara { background: #dcfce7; color: #16a34a; }
+    .btn-alerta { background: #fef08a; color: #ca8a04; }
+    
+    /* Estilos para la cámara dentro del modal */
+    #video-camara { width: 100%; border-radius: 8px; background: #000; display: none; margin-top: 15px; }
+    #foto-preview { width: 100%; border-radius: 8px; margin-top: 15px; display: none; }
+    .resultado-texto {
+      margin-top: 10px; font-size: 0.9rem; color: #555; font-weight: bold; text-align: center;
+      background: #f8fafc; padding: 10px; border-radius: 6px; display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="modal-overlay">
+    <div class="modal-content">
+      <button class="btn-cerrar" onclick="window.location.href='index.html'">✕</button>
+      
+      <!-- NAVEGACIÓN ENTRE NOTICIAS -->
+      <div class="navegacion-noticias">
+        <button id="btn-anterior" class="btn-nav">← Anterior</button>
+        <span id="indicador-pagina" class="indicador-noticia">Noticia 1 de 3</span>
+        <button id="btn-siguiente" class="btn-nav">Siguiente →</button>
+      </div>
+
+      <!-- CONTENIDO DINÁMICO DE LA NOTICIA -->
+      <span style="color: #6ee7b7; font-weight: bold; font-size: 0.8rem; text-transform: uppercase;">Actualidad Espacial</span>
+      <h1 id="titulo-noticia" style="margin: 10px 0; color: #0b1a30; font-size: 1.8rem;">Cargando...</h1>
+      <img id="imagen-noticia" class="noticia-imagen" src="" alt="Noticia">
+      <p id="texto-noticia" style="color: #444; line-height: 1.6;"></p>
+
+      <!-- SECCIÓN DE ACCIONES RELACIONADAS CON LA NOTICIA -->
+      <div class="acciones-noticia">
+        <button id="btn-ubicacion" class="btn-accion btn-ubicacion">
+          📍 ¿Desde dónde lees esto?
+        </button>
+        <button id="btn-abrir-camara" class="btn-accion btn-camara">
+          📸 Reaccionar con Foto
+        </button>
+        <button id="btn-notificacion" class="btn-accion btn-alerta">
+          🔔 Alertas de esta noticia
+        </button>
+      </div>
+
+      <!-- Resultado de Geolocalización -->
+      <p id="resultado-ubicacion" class="resultado-texto"></p>
+
+      <!-- Controles de la Cámara -->
+      <div id="contenedor-camara" style="display: none; margin-top: 15px;">
+        <video id="video-camara" autoplay playsinline></video>
+        <canvas id="canvas-foto" style="display: none;"></canvas>
+        <img id="foto-preview" alt="Tu reacción">
+        
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+          <button id="btn-tomar-foto" class="btn-accion" style="background: #0b1a30; color: white; display: none;">Capturar 📷</button>
+          <button id="btn-guardar-foto" class="btn-accion" style="background: #6ee7b7; color: #0b1a30; display: none;">Guardar Reacción 💾</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="dispositivo.js"></script>
+</body>
+</html>

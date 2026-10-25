@@ -6,6 +6,15 @@ const QUEUE_KEY = "cosmobitacora_sync_queue_v1"; // Clave heredada para migraciÃ
 let articles = [];
 let currentView = "noticias";
 
+
+// Registrar Service Worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('Service Worker registrado con Ã©xito', reg))
+      .catch(err => console.error('Error al registrar Service Worker', err));
+  });
+}
 function safeRead(key, fallback = []) {
   try {
     const value = JSON.parse(localStorage.getItem(key));
@@ -440,7 +449,7 @@ async function boot() {
 
   if ("serviceWorker" in navigator) {
     try {
-      await navigator.serviceWorker.register("/service-worker.js");
+      await navigator.serviceWorker.register("service-worker.js");
     } catch (error) {
       console.error("No se pudo registrar el Service Worker", error);
     }
