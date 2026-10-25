@@ -156,7 +156,7 @@ self.addEventListener("notificationclick", (event) => {
 });
 
 
-/* ACTIVIDAD 10: RECEPCIÓN DE NOTIFICACIONES PUSH */
+/* ACTIVIDAD 10: RECEPCIÓN DE NOTIFICACIONES PUSH. */
 
 self.addEventListener("push", (event) => {
   let data = {
