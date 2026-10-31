@@ -1,11 +1,10 @@
-// Importar helper de IndexedDB para tener acceso a la base de datos en segundo plano
-try {
-  importScripts("/idb-helper.js");
-} catch (e) {
-  console.error("[SW] Error al importar idb-helper.js:", e);
-}
+"use strict";
 
-const CACHE_NAME = "cosmobitacora-static-v4";
+// Importar las funciones de IndexedDB para la sincronización en segundo plano.
+importScripts("/idb-helper.js");
+
+const CACHE_NAME = "cosmobitacora-static-v6";
+
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -16,117 +15,225 @@ const APP_SHELL = [
   "/icons/icon.svg"
 ];
 
-self.addEventListener("install", (event) => {
+// ==========================================
+// INSTALACIÓN
+// ==========================================
+
+self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
+      .then(cache => cache.addAll(APP_SHELL))
       .then(() => self.skipWaiting())
   );
 });
 
-self.addEventListener("activate", (event) => {
+// ==========================================
+// ACTIVACIÓN
+// ==========================================
+
+self.addEventListener("activate", event => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      ))
+      .then(keys =>
+        Promise.all(
+          keys
+            .filter(key => key !== CACHE_NAME)
+            .map(key => caches.delete(key))
+        )
+      )
       .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-  if (event.request.method !== "GET") return;
+// ==========================================
+// SOLICITUDES Y MODO OFFLINE
+// ==========================================
 
-  // API externa y API local de sincronización no se interceptan en caché de navegación estática
-  if (url.hostname === "api.spaceflightnewsapi.net") return;
-  if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) return;
+self.addEventListener("fetch", event => {
+  const request = event.request;
+  const url = new URL(request.url);
 
+  if (request.method !== "GET") {
+    return;
+  }
+
+  // No guardar respuestas de APIs en la caché estática.
+  if (url.hostname === "api.spaceflightnewsapi.net") {
+    return;
+  }
+
+  if (
+    url.origin === self.location.origin &&
+    url.pathname.startsWith("/api/")
+  ) {
+    return;
+  }
+
+  // Navegación: intentar obtener la versión actual y,
+  // si falla la red, usar el index.html almacenado.
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request)
+        .then(response => {
+          if (response.ok) {
+            const copy = response.clone();
+
+            caches.open(CACHE_NAME)
+              .then(cache => cache.put("/index.html", copy));
+          }
+
+          return response;
+        })
+        .catch(async () => {
+          return (
+            await caches.match("/index.html")
+          ) || Response.error();
+        })
+    );
+
+    return;
+  }
+
+  // Para los recursos locales, utilizar primero la caché.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request).then((response) => {
-        if (response && response.ok && url.origin === self.location.origin) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        }
-        return response;
-      }).catch(() => cached || caches.match("/index.html"));
+    caches.match(request).then(async cached => {
+      if (cached) {
+        return cached;
+      }
 
-      return cached || network;
+      try {
+        const response = await fetch(request);
+
+        if (
+          response.ok &&
+          url.origin === self.location.origin
+        ) {
+          const copy = response.clone();
+
+          const cache = await caches.open(CACHE_NAME);
+
+          await cache.put(request, copy);
+        }
+
+        return response;
+      } catch (error) {
+        if (request.destination === "image") {
+          return Response.error();
+        }
+
+        throw error;
+      }
     })
   );
 });
 
 // ==========================================
-// BACKGROUND SYNC - SINCRONIZACIÓN EN SEGUNDO PLANO
+// SINCRONIZACIÓN EN SEGUNDO PLANO DE NOTAS
 // ==========================================
-self.addEventListener("sync", (event) => {
-  if (event.tag === "sync-notes" || event.tag === "cosmobitacora-sync") {
-    console.log(`[SW] Evento de sincronización en segundo plano recibido (${event.tag})`);
+
+self.addEventListener("sync", event => {
+  if (
+    event.tag === "sync-notes" ||
+    event.tag === "cosmobitacora-sync"
+  ) {
     event.waitUntil(syncPendingNotes());
   }
 });
 
-/**
- * Procesa la cola de sincronización pendiente desde IndexedDB y la envía al servidor.
- */
 async function syncPendingNotes() {
-  if (!self.CosmoDB) {
-    console.warn("[SW] CosmoDB no disponible para sincronización.");
+  const queue = await self.CosmoDB.getSyncQueue();
+
+  if (!queue.length) {
     return;
   }
 
-  try {
-    const queue = await self.CosmoDB.getSyncQueue();
-    if (!queue || !queue.length) {
-      console.log("[SW] No hay registros pendientes en IndexedDB.");
-      return;
-    }
+  const response = await fetch("/api/sync", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      records: queue
+    })
+  });
 
-    console.log(`[SW] Sincronizando ${queue.length} registro(s) pendientes con /api/sync...`);
+  if (!response.ok) {
+    throw new Error("No se pudieron sincronizar las notas.");
+  }
 
-    const response = await fetch("/api/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ records: queue })
+  const result = await response.json();
+
+  const ids = queue.map(item => item.id);
+
+  await self.CosmoDB.removeManyFromSyncQueue(ids);
+
+  await self.CosmoDB.markNotesAsSynced(ids);
+
+  const clients = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true
+  });
+
+  for (const client of clients) {
+    client.postMessage({
+      type: "SYNC_COMPLETED",
+      count: result.added ?? queue.length,
+      duplicatesIgnored: result.duplicatesIgnored ?? 0,
+      ids
     });
-
-    if (!response.ok) {
-      throw new Error(`El servidor respondió con código HTTP ${response.status}`);
-    }
-
-    const result = await response.json();
-    const ids = queue.map((item) => item.id);
-
-    // 1. Limpiar registros de la cola en IndexedDB
-    await self.CosmoDB.removeManyFromSyncQueue(ids);
-
-    // 2. Marcar las notas correspondientes como sincronizadas en IndexedDB
-    await self.CosmoDB.markNotesAsSynced(ids);
-
-    console.log(`[SW] Sincronización exitosa: ${ids.length} registros procesados.`);
-
-    // 3. Notificar a las ventanas abiertas para refrescar la interfaz sin recargar
-    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    for (const client of clients) {
-      client.postMessage({
-        type: "SYNC_COMPLETED",
-        count: result.added !== undefined ? result.added : queue.length,
-        duplicatesIgnored: result.duplicatesIgnored || 0,
-        ids: ids
-      });
-    }
-  } catch (error) {
-    console.error("[SW] Error durante Background Sync:", error);
-    // Relanzar el error le indica al Background Sync que vuelva a intentar más tarde con backoff
-    throw error;
   }
 }
 
+// ==========================================
+// NOTIFICACIONES PUSH
+// ==========================================
 
-/* ACTIVIDAD 10: ACCIÓN AL PULSAR UNA NOTIFICACIÓN */
+self.addEventListener("push", event => {
+  let data = {
+    title: "CosmoBitácora",
+    body: "Tienes una nueva notificación.",
+    url: "/"
+  };
 
-self.addEventListener("notificationclick", (event) => {
+  if (event.data) {
+    try {
+      data = {
+        ...data,
+        ...event.data.json()
+      };
+    } catch {
+      data.body = event.data.text();
+    }
+  }
+
+  const target = new URL(
+    data.url || "/",
+    self.location.origin
+  );
+
+  // Evitar redirecciones de notificaciones a sitios externos.
+  if (target.origin !== self.location.origin) {
+    target.href = self.location.origin + "/";
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "/icons/icon.svg",
+      badge: "/icons/icon.svg",
+      tag: "cosmobitacora-push",
+      data: {
+        url: target.href
+      }
+    })
+  );
+});
+
+// ==========================================
+// CLIC EN UNA NOTIFICACIÓN
+// ==========================================
+
+self.addEventListener("notificationclick", event => {
   event.notification.close();
 
   event.waitUntil(
@@ -143,59 +250,13 @@ self.addEventListener("notificationclick", (event) => {
 
       for (const client of windows) {
         if (client.url === targetUrl && "focus" in client) {
-          await client.focus();
-          return;
+          return client.focus();
         }
       }
 
       if (self.clients.openWindow) {
-        await self.clients.openWindow(targetUrl);
+        return self.clients.openWindow(targetUrl);
       }
     })()
   );
 });
-
-
-/* ACTIVIDAD 10: RECEPCIÓN DE NOTIFICACIONES PUSH. */
-
-self.addEventListener("push", (event) => {
-  let data = {
-    title: "CosmoBitácora",
-    body: "Tienes una nueva notificación.",
-    url: "/"
-  };
-
-  if (event.data) {
-    try {
-      data = {
-        ...data,
-        ...event.data.json()
-      };
-    } catch (error) {
-      data.body = event.data.text();
-    }
-  }
-
-  const targetUrl = new URL(
-    data.url || "/",
-    self.location.origin
-  );
-
-  // Evitar que un mensaje push dirija a sitios externos.
-  if (targetUrl.origin !== self.location.origin) {
-    targetUrl.href = self.location.origin + "/";
-  }
-
-  event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: "/icons/icon.svg",
-      badge: "/icons/icon.svg",
-      tag: "cosmobitacora-push",
-      data: {
-        url: targetUrl.href
-      }
-    })
-  );
-});
-

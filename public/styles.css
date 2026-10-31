@@ -72,3 +72,137 @@
     width: 100%;
   }
 }
+
+/* ==========================================
+   ACTIVIDAD 12: GESTIÓN DE TAREAS
+   ========================================== */
+
+.tasks-panel {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.task-form-card,
+.task-list-area {
+  min-width: 0;
+}
+
+#taskForm select {
+  width: 100%;
+  border: 1px solid #d7e0e9;
+  border-radius: 9px;
+  padding: 12px;
+  background: #fbfcfe;
+  color: #19283e;
+}
+
+#taskForm input,
+#taskForm textarea,
+#taskForm select {
+  box-sizing: border-box;
+}
+
+.task-form-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.task-form-actions button {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.task-location-status {
+  font-size: 0.82rem;
+  color: #718096;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.task-card {
+  padding: 17px;
+  margin-bottom: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 4px 18px #233d5b08;
+}
+
+.task-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.task-card p {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  color: #718096;
+}
+
+.task-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.task-state {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 20px;
+  background: #eaf8f4;
+  color: #317b71;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.state-completada {
+  background: #eaf8f4;
+  color: #207865;
+}
+
+.state-pendiente {
+  background: #fff5e8;
+  color: #80552c;
+}
+
+.state-en-progreso {
+  background: #eaf0ff;
+  color: #3155a4;
+}
+
+.task-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.task-overdue {
+  color: #b42318 !important;
+  font-weight: 700;
+}
+
+.task-list-area .journal-tools {
+  margin-bottom: 14px;
+}
+
+@media (max-width: 900px) {
+  .tasks-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 580px) {
+  .task-card-heading {
+    flex-direction: column;
+  }
+
+  .task-card-actions button {
+    flex: 1;
+  }
+}
