@@ -81,7 +81,6 @@
         </button>
       </nav>
 
-      <!-- Herramientas del dispositivo -->
       <section class="device-tools" aria-labelledby="deviceToolsTitle">
         <div class="device-tools-heading">
           <p class="eyebrow">FUNCIONES DEL DISPOSITIVO</p>
@@ -162,22 +161,19 @@
 
         <div id="message" class="message hidden"></div>
 
-        <!-- Noticias -->
         <div id="newsGrid" class="news-grid" aria-live="polite"></div>
 
-        <!-- Bitácora existente -->
         <div id="journalPanel" class="journal-panel hidden">
           <div class="form-card">
-            <h3>Agregar una nota a tu bitácora</h3>
+            <h3 id="noteFormTitle">Agregar una nota a tu bitácora</h3>
 
-            <p>
+            <p id="noteFormDesc">
               La nota se guarda primero en este dispositivo.
               Cuando vuelva internet, podrás sincronizarla con el servidor.
             </p>
 
             <form id="noteForm">
               <label for="noteTitle">Título</label>
-
               <input
                 id="noteTitle"
                 maxlength="180"
@@ -185,28 +181,52 @@
                 placeholder="Ej. Misión que quiero investigar">
 
               <label for="noteDetail">Nota</label>
-
               <textarea
                 id="noteDetail"
                 maxlength="2000"
                 rows="4"
                 placeholder="Escribe tus observaciones…"></textarea>
 
-              <button class="button button-primary" type="submit">
-                Guardar nota sin conexión
-              </button>
+              <label for="noteRegisterDate">Fecha de registro</label>
+              <input
+                id="noteRegisterDate"
+                type="datetime-local"
+                required>
+
+              <label for="notePriority">Prioridad de atención</label>
+              <select id="notePriority">
+                <option value="baja">Baja</option>
+                <option value="media" selected>Media</option>
+                <option value="alta">Alta</option>
+                <option value="urgente">Urgente</option>
+              </select>
+
+              <div class="task-form-actions">
+                <button id="saveNoteBtn" class="button button-primary" type="submit">
+                  Guardar nota sin conexión
+                </button>
+
+                <button
+                  id="cancelNoteBtn"
+                  class="button button-outline hidden"
+                  type="button">
+                  Cancelar
+                </button>
+              </div>
             </form>
           </div>
 
-          <div class="journal-tools">
-            <h3>Registros guardados</h3>
+          <div class="journal-tools-wrap">
+            <div class="journal-tools">
+              <h3>Registros guardados</h3>
 
-            <button id="syncBtn" class="button button-outline" type="button">
-              ⇅ Sincronizar pendientes
-            </button>
+              <button id="syncBtn" class="button button-outline" type="button">
+                ⇅ Sincronizar pendientes
+              </button>
+            </div>
+
+            <div id="journalList" class="journal-list"></div>
           </div>
-
-          <div id="journalList" class="journal-list"></div>
 
           <div class="server-records">
             <h3>Registros recibidos por el servidor</h3>
@@ -219,9 +239,7 @@
           </div>
         </div>
 
-        <!-- Módulo nuevo de la Actividad 12 -->
         <section id="tasksPanel" class="tasks-panel hidden" aria-label="Gestión de tareas">
-
           <div class="form-card task-form-card">
             <h3 id="taskFormTitle">Registrar una tarea</h3>
 
@@ -232,7 +250,6 @@
 
             <form id="taskForm">
               <label for="taskTitle">Título</label>
-
               <input
                 id="taskTitle"
                 type="text"
@@ -241,22 +258,33 @@
                 placeholder="Ej. Entregar proyecto">
 
               <label for="taskDescription">Descripción</label>
-
               <textarea
                 id="taskDescription"
                 maxlength="2000"
                 rows="4"
                 placeholder="Describe la actividad..."></textarea>
 
-              <label for="taskDueDate">Fecha límite</label>
+              <label for="taskRegisterDate">Fecha de registro</label>
+              <input
+                id="taskRegisterDate"
+                type="datetime-local"
+                required>
 
+              <label for="taskDueDate">Fecha límite</label>
               <input
                 id="taskDueDate"
                 type="datetime-local"
                 required>
 
-              <label for="taskStatus">Estado</label>
+              <label for="taskPriority">Prioridad de atención</label>
+              <select id="taskPriority">
+                <option value="baja">Baja</option>
+                <option value="media" selected>Media</option>
+                <option value="alta">Alta</option>
+                <option value="urgente">Urgente</option>
+              </select>
 
+              <label for="taskStatus">Estado</label>
               <select id="taskStatus">
                 <option value="pendiente">Pendiente</option>
                 <option value="en progreso">En progreso</option>
@@ -279,7 +307,7 @@
               </p>
 
               <div class="task-form-actions">
-                <button class="button button-primary" type="submit">
+                <button id="saveTaskBtn" class="button button-primary" type="submit">
                   Guardar tarea
                 </button>
 
@@ -307,7 +335,6 @@
 
             <div id="taskList" class="journal-list"></div>
           </div>
-
         </section>
       </section>
     </main>

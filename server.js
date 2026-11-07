@@ -7,23 +7,24 @@ const webpush = require("web-push");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = "/tmp/cosmobiotica-data";
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "sync-records.json");
-// Crear la carpeta antes de crear los archivos de datos.
+const PUSH_FILE = path.join(DATA_DIR, "push-subscriptions.json");
+
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
-app.use(express.json({ limit: "1mb" }));
-app.use(express.static(path.join(__dirname, "public")));
-
-
-/* ACTIVIDAD 10: CONFIGURACIÓN DE NOTIFICACIONES PUSH */
-
-const PUSH_FILE = path.join(DATA_DIR, "push-subscriptions.json");
 
 if (!fs.existsSync(PUSH_FILE)) {
   fs.writeFileSync(PUSH_FILE, "[]", "utf8");
 }
+
+if (!fs.existsSync(DB_FILE)) {
+  fs.writeFileSync(DB_FILE, "[]", "utf8");
+}
+
+app.use(express.json({ limit: "1mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
 function readSubscriptions() {
   try {
@@ -41,8 +42,21 @@ function writeSubscriptions(subscriptions) {
   );
 }
 
+function readRecords() {
+  try {
+    return JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
 
-/* ACTIVIDAD 10: ENVÍO AUTOMÁTICO DE NOTIFICACIONES PUSH */
+function writeRecords(records) {
+  fs.writeFileSync(
+    DB_FILE,
+    JSON.stringify(records, null, 2),
+    "utf8"
+  );
+}
 
 async function sendPushToSubscribers(payload) {
   const subscriptions = readSubscriptions();
@@ -56,7 +70,6 @@ async function sendPushToSubscribers(payload) {
           subscription,
           JSON.stringify(payload)
         );
-
         sent++;
       } catch (error) {
         console.error(
@@ -64,11 +77,7 @@ async function sendPushToSubscribers(payload) {
           error.statusCode || error.message
         );
 
-        // Eliminar suscripciones que ya no existen.
-        if (
-          error.statusCode === 404 ||
-          error.statusCode === 410
-        ) {
+        if (error.statusCode === 404 || error.statusCode === 410) {
           invalidEndpoints.add(subscription.endpoint);
         }
       }
@@ -78,8 +87,7 @@ async function sendPushToSubscribers(payload) {
   if (invalidEndpoints.size > 0) {
     writeSubscriptions(
       readSubscriptions().filter(
-        (subscription) =>
-          !invalidEndpoints.has(subscription.endpoint)
+        (subscription) => !invalidEndpoints.has(subscription.endpoint)
       )
     );
   }
@@ -87,13 +95,11 @@ async function sendPushToSubscribers(payload) {
   return { sent };
 }
 
-
 const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
 const vapidSubject = process.env.VAPID_SUBJECT;
 
-const pushConfigured =
-  Boolean(vapidPublicKey && vapidPrivateKey && vapidSubject);
+const pushConfigured = Boolean(vapidPublicKey && vapidPrivateKey && vapidSubject);
 
 if (pushConfigured) {
   webpush.setVapidDetails(
@@ -102,12 +108,9 @@ if (pushConfigured) {
     vapidPrivateKey
   );
 } else {
-  console.warn(
-    "[Push] Faltan claves VAPID. Configura el archivo .env."
-  );
+  console.warn("[Push] Faltan claves VAPID.");
 }
 
-// Entregar al navegador únicamente la clave pública.
 app.get("/api/push/public-key", (_req, res) => {
   if (!pushConfigured) {
     return res.status(503).json({
@@ -119,7 +122,6 @@ app.get("/api/push/public-key", (_req, res) => {
   res.json({ publicKey: vapidPublicKey });
 });
 
-// Guardar la suscripción creada por el navegador.
 app.post("/api/push/subscribe", (req, res) => {
   if (!pushConfigured) {
     return res.status(503).json({
@@ -142,7 +144,6 @@ app.post("/api/push/subscribe", (req, res) => {
   }
 
   const subscriptions = readSubscriptions();
-
   const exists = subscriptions.some(
     (item) => item.endpoint === subscription.endpoint
   );
@@ -158,7 +159,6 @@ app.post("/api/push/subscribe", (req, res) => {
   });
 });
 
-// Enviar una notificación de prueba a las suscripciones guardadas.
 app.post("/api/push/test", async (_req, res) => {
   if (!pushConfigured) {
     return res.status(503).json({
@@ -176,7 +176,7 @@ app.post("/api/push/test", async (_req, res) => {
 
   const payload = JSON.stringify({
     title: "CosmoBitácora",
-    body: "¡Notificación push recibida desde el servidor!",
+    body: "Notificación push recibida desde el servidor",
     url: "/"
   });
 
@@ -189,8 +189,6 @@ app.post("/api/push/test", async (_req, res) => {
       sent++;
     } catch (error) {
       console.error("[Push] Error de envío:", error.statusCode);
-
-      // 404 y 410 indican que la suscripción ya no es válida.
       if (error.statusCode === 404 || error.statusCode === 410) {
         invalidEndpoints.add(subscription.endpoint);
       }
@@ -213,25 +211,13 @@ app.post("/api/push/test", async (_req, res) => {
   });
 });
 
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, service: "ExploraPWA Sync API" });
+});
 
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, "[]", "utf8");
-
-function readRecords() {
-  try { return JSON.parse(fs.readFileSync(DB_FILE, "utf8")); }
-  catch { return []; }
-}
-function writeRecords(records) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(records, null, 2), "utf8");
-}
-
-app.get("/api/health", (_req, res) => res.json({ ok: true, service: "ExploraPWA Sync API" }));
-
-// Idempotencia: cada registro tiene un id creado por el cliente. Si se reenvía,
-// el servidor no lo duplica.
-//1
-
-/* ACTIVIDAD 10: SINCRONIZAR NOTAS Y NOTIFICAR POR PUSH */
+app.get("/api/sync", (_req, res) => {
+  res.json({ records: readRecords() });
+});
 
 app.post("/api/sync", async (req, res) => {
   const incoming = Array.isArray(req.body.records)
@@ -245,10 +231,8 @@ app.post("/api/sync", async (req, res) => {
   }
 
   const records = readRecords();
-  const knownIds = new Set(records.map((record) => record.id));
-
   const added = [];
-  let duplicates = 0;
+  let updated = 0;
 
   for (const item of incoming) {
     if (
@@ -259,42 +243,47 @@ app.post("/api/sync", async (req, res) => {
       continue;
     }
 
-    // No volver a registrar ni notificar registros duplicados.
-    if (knownIds.has(item.id)) {
-      duplicates++;
-      continue;
-    }
-
     const safe = {
       id: item.id,
       type: String(item.type || "nota").slice(0, 40),
-      title: String(item.title || "Registro sin título").slice(0, 180),
-      detail: String(item.detail || "").slice(0, 2000),
-      createdAt: String(item.createdAt || new Date().toISOString()),
+      title: String(item.title || item.titulo || "Registro sin título").slice(0, 180),
+      detail: String(item.detail || item.descripcion || "").slice(0, 2000),
+      prioridad: String(item.prioridad || "media").slice(0, 20),
+      fechaRegistro: String(item.fechaRegistro || item.createdAt || new Date().toISOString()),
+      fechaLimite: item.fechaLimite ? String(item.fechaLimite) : null,
+      estado: item.estado ? String(item.estado).slice(0, 30) : null,
+      latitud: typeof item.latitud === "number" ? item.latitud : null,
+      longitud: typeof item.longitud === "number" ? item.longitud : null,
+      createdAt: String(item.createdAt || item.fechaRegistro || new Date().toISOString()),
+      updatedAt: String(item.updatedAt || new Date().toISOString()),
       syncedAt: new Date().toISOString()
     };
 
-    records.push(safe);
-    knownIds.add(safe.id);
-    added.push(safe);
+    const existingIndex = records.findIndex((r) => r.id === safe.id);
+
+    if (existingIndex >= 0) {
+      records[existingIndex] = safe;
+      updated++;
+    } else {
+      records.push(safe);
+      added.push(safe);
+    }
   }
 
-  // Guardar primero los registros en el servidor.
   writeRecords(records);
 
   let pushSent = 0;
 
-  // Enviar push solamente cuando hay registros nuevos.
   if (added.length > 0 && pushConfigured) {
     const title =
       added.length === 1
-        ? "¡Nota sincronizada en CosmoBitácora!"
-        : "¡Notas sincronizadas en CosmoBitácora!";
+        ? "Registro sincronizado"
+        : "Registros sincronizados";
 
     const body =
       added.length === 1
-        ? `El servidor recibió la nota "${added[0].title}".`
-        : `El servidor recibió ${added.length} notas nuevas.`;
+        ? `Se sincronizó "${added[0].title}".`
+        : `Se sincronizaron ${added.length} registros.`;
 
     const result = await sendPushToSubscribers({
       title,
@@ -309,17 +298,26 @@ app.post("/api/sync", async (req, res) => {
     ok: true,
     received: incoming.length,
     added: added.length,
-    duplicatesIgnored: duplicates,
+    updated,
     total: records.length,
     pushSent,
-    message:
-      added.length > 0
-        ? `Registros nuevos: ${added.length}. Push enviados: ${pushSent}.`
-        : "No hay registros nuevos; no se enviaron notificaciones push."
+    message: `Agregados: ${added.length}. Actualizados: ${updated}.`
   });
 });
 
+app.delete("/api/sync/:id", (req, res) => {
+  const { id } = req.params;
+  const records = readRecords();
+  const filtered = records.filter((record) => record.id !== id);
 
-app.get("/api/sync", (_req, res) => res.json({ records: readRecords() }));
+  if (filtered.length !== records.length) {
+    writeRecords(filtered);
+    return res.json({ ok: true, deleted: id });
+  }
 
-app.listen(PORT, () => console.log(`ExploraPWA disponible en http://localhost:${PORT}`));
+  res.json({ ok: true, deleted: null });
+});
+
+app.listen(PORT, () => {
+  console.log(`ExploraPWA disponible en http://localhost:${PORT}`);
+});

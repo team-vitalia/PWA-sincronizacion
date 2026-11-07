@@ -1,9 +1,8 @@
 "use strict";
 
-// Importar las funciones de IndexedDB para la sincronización en segundo plano.
 importScripts("/idb-helper.js");
 
-const CACHE_NAME = "cosmobitacora-static-v6";
+const CACHE_NAME = "cosmobitacora-static-v7";
 
 const APP_SHELL = [
   "/",
@@ -15,10 +14,6 @@ const APP_SHELL = [
   "/icons/icon.svg"
 ];
 
-// ==========================================
-// INSTALACIÓN
-// ==========================================
-
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -26,10 +21,6 @@ self.addEventListener("install", event => {
       .then(() => self.skipWaiting())
   );
 });
-
-// ==========================================
-// ACTIVACIÓN
-// ==========================================
 
 self.addEventListener("activate", event => {
   event.waitUntil(
@@ -45,10 +36,6 @@ self.addEventListener("activate", event => {
   );
 });
 
-// ==========================================
-// SOLICITUDES Y MODO OFFLINE
-// ==========================================
-
 self.addEventListener("fetch", event => {
   const request = event.request;
   const url = new URL(request.url);
@@ -57,7 +44,6 @@ self.addEventListener("fetch", event => {
     return;
   }
 
-  // No guardar respuestas de APIs en la caché estática.
   if (url.hostname === "api.spaceflightnewsapi.net") {
     return;
   }
@@ -69,19 +55,15 @@ self.addEventListener("fetch", event => {
     return;
   }
 
-  // Navegación: intentar obtener la versión actual y,
-  // si falla la red, usar el index.html almacenado.
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
         .then(response => {
           if (response.ok) {
             const copy = response.clone();
-
             caches.open(CACHE_NAME)
               .then(cache => cache.put("/index.html", copy));
           }
-
           return response;
         })
         .catch(async () => {
@@ -90,11 +72,9 @@ self.addEventListener("fetch", event => {
           ) || Response.error();
         })
     );
-
     return;
   }
 
-  // Para los recursos locales, utilizar primero la caché.
   event.respondWith(
     caches.match(request).then(async cached => {
       if (cached) {
@@ -109,9 +89,7 @@ self.addEventListener("fetch", event => {
           url.origin === self.location.origin
         ) {
           const copy = response.clone();
-
           const cache = await caches.open(CACHE_NAME);
-
           await cache.put(request, copy);
         }
 
@@ -120,16 +98,11 @@ self.addEventListener("fetch", event => {
         if (request.destination === "image") {
           return Response.error();
         }
-
         throw error;
       }
     })
   );
 });
-
-// ==========================================
-// SINCRONIZACIÓN EN SEGUNDO PLANO DE NOTAS
-// ==========================================
 
 self.addEventListener("sync", event => {
   if (
@@ -166,7 +139,6 @@ async function syncPendingNotes() {
   const ids = queue.map(item => item.id);
 
   await self.CosmoDB.removeManyFromSyncQueue(ids);
-
   await self.CosmoDB.markNotesAsSynced(ids);
 
   const clients = await self.clients.matchAll({
@@ -183,10 +155,6 @@ async function syncPendingNotes() {
     });
   }
 }
-
-// ==========================================
-// NOTIFICACIONES PUSH
-// ==========================================
 
 self.addEventListener("push", event => {
   let data = {
@@ -211,7 +179,6 @@ self.addEventListener("push", event => {
     self.location.origin
   );
 
-  // Evitar redirecciones de notificaciones a sitios externos.
   if (target.origin !== self.location.origin) {
     target.href = self.location.origin + "/";
   }
@@ -228,10 +195,6 @@ self.addEventListener("push", event => {
     })
   );
 });
-
-// ==========================================
-// CLIC EN UNA NOTIFICACIÓN
-// ==========================================
 
 self.addEventListener("notificationclick", event => {
   event.notification.close();

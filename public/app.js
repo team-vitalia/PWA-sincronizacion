@@ -1,7 +1,6 @@
 "use strict";
 
-const API_URL =
-  "https://api.spaceflightnewsapi.net/v4/articles/?limit=12";
+const API_URL = "https://api.spaceflightnewsapi.net/v4/articles/?limit=12";
 
 const $ = id => document.getElementById(id);
 
@@ -12,15 +11,12 @@ const QUEUE_KEY = "cosmobitacora_sync_queue_v1";
 let articles = [];
 let currentView = "noticias";
 let editingTaskId = null;
+let editingNoteId = null;
 
 let currentTaskLocation = {
   latitude: null,
   longitude: null
 };
-
-// ==========================================
-// UTILIDADES
-// ==========================================
 
 function safeRead(key, fallback = []) {
   try {
@@ -61,6 +57,13 @@ function summarize(text = "", max = 145) {
     : clean;
 }
 
+function toDatetimeLocal(isoString) {
+  const date = isoString ? new Date(isoString) : new Date();
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = n => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function showMessage(text, type = "info") {
   const message = $("message");
 
@@ -87,10 +90,6 @@ function updateConnection() {
     ? "Con conexión"
     : "Modo sin conexión";
 }
-
-// ==========================================
-// NOTICIAS ESPACIALES
-// ==========================================
 
 async function loadArticles() {
   hideMessage();
@@ -151,18 +150,15 @@ async function loadArticles() {
 
     if (articles.length) {
       showMessage(
-        "No se pudo contactar la API. Se muestran las noticias guardadas localmente."
+        "No se pudo consultar la API. Mostrando noticias locales."
       );
-
       await renderView();
     } else {
-      $("newsGrid").innerHTML =
-        '<div class="empty">No fue posible obtener noticias.</div>';
-
-      showMessage(
-        "Error al consultar la API externa: " + error.message,
-        "error"
-      );
+      $("newsGrid").innerHTML = `
+        <div class="empty">
+          No se pudieron cargar noticias: ${escapeHTML(error.message)}
+        </div>
+      `;
     }
   }
 }
@@ -336,10 +332,6 @@ async function toggleFavorite(id) {
   await renderView();
 }
 
-// ==========================================
-// CONTADORES Y BITÁCORA
-// ==========================================
-
 async function updateCounters() {
   $("favCount").textContent =
     safeRead(FAVORITES_KEY).length;
@@ -369,33 +361,56 @@ async function renderJournal() {
     const notes = await CosmoDB.getAllNotes();
 
     $("journalList").innerHTML = notes.length
-      ? notes.slice().reverse().map(note => `
-          <article class="journal-item">
-            <h4>${escapeHTML(note.title)}</h4>
+      ? notes.slice().reverse().map(note => {
+          const priority = note.prioridad || "media";
+          const regDate = note.fechaRegistro || note.createdAt;
 
-            <p>
-              ${escapeHTML(note.detail || "Sin descripción")}
-            </p>
+          return `
+            <article class="journal-item">
+              <div class="journal-item-heading">
+                <h4>${escapeHTML(note.title)}</h4>
 
-            <small>
-              ${escapeHTML(
-                new Date(note.createdAt).toLocaleString("es-MX")
-              )}
+                <span class="priority-badge priority-${escapeHTML(priority.toLowerCase())}">
+                  ${escapeHTML(priority)}
+                </span>
+              </div>
 
-              ·
+              <p>
+                ${escapeHTML(note.detail || "Sin descripción")}
+              </p>
 
-              <span class="sync-status ${
-                note.synced ? "synced" : "pending"
-              }">
-                ${
-                  note.synced
-                    ? "Sincronizado"
-                    : "Pendiente de sincronizar"
-                }
-              </span>
-            </small>
-          </article>
-        `).join("")
+              <div class="journal-meta-row">
+                <span>
+                  <strong>Registro:</strong>
+                  ${escapeHTML(new Date(regDate).toLocaleString("es-MX"))}
+                </span>
+
+                <span>
+                  <strong>Sincronización:</strong>
+                  <span class="sync-status ${note.synced ? "synced" : "pending"}">
+                    ${note.synced ? "Sincronizado" : "Pendiente"}
+                  </span>
+                </span>
+              </div>
+
+              <div class="journal-actions">
+                <button
+                  class="small-btn"
+                  data-edit-note="${escapeHTML(note.id)}"
+                  type="button">
+                  Editar
+                </button>
+
+                <button
+                  class="small-btn delete-btn"
+                  data-delete-note="${escapeHTML(note.id)}"
+                  type="button">
+                  Eliminar
+                </button>
+              </div>
+            </article>
+          `;
+        }).join("")
       : '<div class="empty">Todavía no hay notas. Puedes crear una incluso sin conexión.</div>';
   } catch (error) {
     $("journalList").innerHTML = `
@@ -407,20 +422,93 @@ async function renderJournal() {
   }
 }
 
-async function addNote(event) {
+async function editNote(id) {
+  const note = await CosmoDB.getNote(id);
+  if (!note) return;
+
+  editingNoteId = note.id;
+
+  $("noteTitle").value = note.title;
+  $("noteDetail").value = note.detail || "";
+  $("noteRegisterDate").value = toDatetimeLocal(note.fechaRegistro || note.createdAt);
+  $("notePriority").value = note.prioridad || "media";
+
+  $("noteFormTitle").textContent = "Editar nota";
+  $("saveNoteBtn").textContent = "Actualizar nota";
+  $("cancelNoteBtn").classList.remove("hidden");
+
+  $("noteForm").scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  });
+}
+
+function cancelNoteEdit() {
+  editingNoteId = null;
+  $("noteForm").reset();
+
+  if ($("noteRegisterDate")) {
+    $("noteRegisterDate").value = toDatetimeLocal();
+  }
+  $("notePriority").value = "media";
+
+  $("noteFormTitle").textContent = "Agregar una nota a tu bitácora";
+  $("saveNoteBtn").textContent = "Guardar nota sin conexión";
+  $("cancelNoteBtn").classList.add("hidden");
+}
+
+async function deleteNote(id) {
+  if (!confirm("¿Deseas eliminar este registro de la bitácora?")) return;
+
+  try {
+    await CosmoDB.deleteNote(id);
+    await CosmoDB.removeFromSyncQueue(id);
+
+    if (navigator.onLine) {
+      try {
+        await fetch(`/api/sync/${id}`, { method: "DELETE" });
+      } catch (error) {
+        console.warn("No se pudo eliminar en el servidor:", error);
+      }
+    }
+
+    if (editingNoteId === id) {
+      cancelNoteEdit();
+    }
+
+    showMessage("Nota eliminada correctamente.");
+    await renderJournal();
+    await updateCounters();
+    await loadServerRecords();
+  } catch (error) {
+    showMessage("Error al eliminar la nota: " + error.message, "error");
+  }
+}
+
+async function saveNoteFromForm(event) {
   event.preventDefault();
 
   const title = $("noteTitle").value.trim();
   const detail = $("noteDetail").value.trim();
+  const regValue = $("noteRegisterDate").value;
+  const prioridad = $("notePriority").value || "media";
 
   if (!title) return;
 
+  const oldNote = editingNoteId ? await CosmoDB.getNote(editingNoteId) : null;
+  const fechaRegistro = regValue
+    ? new Date(regValue).toISOString()
+    : (oldNote?.fechaRegistro || new Date().toISOString());
+
   const note = {
-    id: makeId(),
+    id: editingNoteId || makeId(),
     type: "nota",
     title,
     detail,
-    createdAt: new Date().toISOString(),
+    prioridad,
+    fechaRegistro,
+    createdAt: oldNote ? oldNote.createdAt : fechaRegistro,
+    updatedAt: new Date().toISOString(),
     synced: false
   };
 
@@ -429,7 +517,10 @@ async function addNote(event) {
     type: note.type,
     title: note.title,
     detail: note.detail,
-    createdAt: note.createdAt
+    prioridad: note.prioridad,
+    fechaRegistro: note.fechaRegistro,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt
   };
 
   try {
@@ -440,11 +531,10 @@ async function addNote(event) {
       "No se pudo guardar la nota: " + error.message,
       "error"
     );
-
     return;
   }
 
-  $("noteForm").reset();
+  cancelNoteEdit();
 
   await notifyNoteSavedLocally(note.title);
   await renderJournal();
@@ -454,9 +544,7 @@ async function addNote(event) {
     showMessage(
       "Nota guardada localmente. Se sincronizará cuando vuelva internet."
     );
-
     await requestBackgroundSync();
-
     return;
   }
 
@@ -490,7 +578,6 @@ async function addNote(event) {
       "La nota está guardada localmente. La sincronización queda pendiente.",
       "error"
     );
-
     await requestBackgroundSync();
   }
 }
@@ -508,9 +595,7 @@ async function syncPending() {
       "Sin conexión. Los registros permanecen guardados localmente.",
       "error"
     );
-
     await requestBackgroundSync();
-
     return;
   }
 
@@ -533,7 +618,6 @@ async function syncPending() {
     }
 
     const result = await response.json();
-
     const ids = queue.map(item => item.id);
 
     await CosmoDB.removeManyFromSyncQueue(ids);
@@ -556,7 +640,6 @@ async function syncPending() {
       error.message,
       "error"
     );
-
     await requestBackgroundSync();
   } finally {
     $("syncBtn").disabled = false;
@@ -571,13 +654,9 @@ async function requestBackgroundSync() {
   ) {
     try {
       const registration = await navigator.serviceWorker.ready;
-
       await registration.sync.register("sync-notes");
     } catch (error) {
-      console.warn(
-        "No se pudo registrar Background Sync:",
-        error
-      );
+      console.warn("No se pudo registrar Background Sync:", error);
     }
   }
 }
@@ -586,7 +665,6 @@ async function loadServerRecords() {
   if (!navigator.onLine) {
     $("serverList").innerHTML =
       '<p class="empty">El servidor no está disponible sin conexión.</p>';
-
     return;
   }
 
@@ -602,17 +680,19 @@ async function loadServerRecords() {
     $("serverList").innerHTML = data.records.length
       ? data.records.slice().reverse().map(record => `
           <div class="server-record">
-            <strong>${escapeHTML(record.title)}</strong><br>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <strong>${escapeHTML(record.title)}</strong>
+              <span class="priority-badge priority-${escapeHTML((record.prioridad || "media").toLowerCase())}">
+                ${escapeHTML(record.prioridad || "media")}
+              </span>
+            </div>
 
             <span>
               ${escapeHTML(record.detail || "Sin descripción")}
             </span><br>
 
             <small>
-              Recibido:
-              ${escapeHTML(
-                new Date(record.syncedAt).toLocaleString("es-MX")
-              )}
+              Registro: ${escapeHTML(new Date(record.fechaRegistro || record.createdAt).toLocaleString("es-MX"))} · Recibido: ${escapeHTML(new Date(record.syncedAt).toLocaleString("es-MX"))}
             </small>
           </div>
         `).join("")
@@ -621,10 +701,6 @@ async function loadServerRecords() {
     $("serverList").textContent = error.message;
   }
 }
-
-// ==========================================
-// ACTIVIDAD 12: LISTADO DE TAREAS
-// ==========================================
 
 async function renderTasks() {
   const allTasks = await CosmoDB.getAllTasks();
@@ -649,12 +725,12 @@ async function renderTasks() {
         Utiliza el formulario para crear la primera.
       </div>
     `;
-
     return;
   }
 
   list.innerHTML = tasks.map(task => {
     const dueDate = new Date(task.fechaLimite);
+    const regDate = new Date(task.fechaRegistro || task.createdAt);
 
     const overdue =
       task.estado !== "completada" &&
@@ -671,18 +747,31 @@ async function renderTasks() {
     const safeState = String(task.estado)
       .replace(/\s/g, "-");
 
+    const priority = task.prioridad || "media";
+
     return `
       <article class="task-card">
         <div class="task-card-heading">
           <h3>${escapeHTML(task.titulo)}</h3>
 
-          <span class="task-state state-${escapeHTML(safeState)}">
-            ${escapeHTML(task.estado)}
-          </span>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span class="priority-badge priority-${escapeHTML(priority.toLowerCase())}">
+              ${escapeHTML(priority)}
+            </span>
+
+            <span class="task-state state-${escapeHTML(safeState)}">
+              ${escapeHTML(task.estado)}
+            </span>
+          </div>
         </div>
 
         <p>
           ${escapeHTML(task.descripcion || "Sin descripción")}
+        </p>
+
+        <p>
+          <strong>Fecha de registro:</strong>
+          ${escapeHTML(regDate.toLocaleString("es-MX"))}
         </p>
 
         <p>
@@ -697,7 +786,6 @@ async function renderTasks() {
 
         <p>
           <strong>Sincronización:</strong>
-
           <span class="sync-status ${
             task.synced ? "synced" : "pending"
           }">
@@ -729,21 +817,26 @@ async function renderTasks() {
                 : "Marcar completada"
             }
           </button>
+
+          <button
+            class="small-btn delete-btn"
+            data-delete-task="${escapeHTML(task.id)}"
+            type="button">
+            Eliminar
+          </button>
         </div>
       </article>
     `;
   }).join("");
 }
 
-// ==========================================
-// ACTIVIDAD 12: REGISTRAR Y EDITAR TAREAS
-// ==========================================
-
 async function saveTaskFromForm(event) {
   event.preventDefault();
 
   const title = $("taskTitle").value.trim();
   const dueValue = $("taskDueDate").value;
+  const regValue = $("taskRegisterDate").value;
+  const priority = $("taskPriority").value || "media";
 
   if (
     !title ||
@@ -754,7 +847,6 @@ async function saveTaskFromForm(event) {
       "Escribe un título y una fecha límite válida.",
       "error"
     );
-
     return;
   }
 
@@ -762,86 +854,60 @@ async function saveTaskFromForm(event) {
     ? await CosmoDB.getTask(editingTaskId)
     : null;
 
+  const fechaRegistro = regValue
+    ? new Date(regValue).toISOString()
+    : (oldTask?.fechaRegistro || new Date().toISOString());
+
   const task = {
     id: editingTaskId || makeId(),
-
     type: "tarea",
-
     titulo: title,
-
     descripcion: $("taskDescription").value.trim(),
-
+    prioridad: priority,
+    fechaRegistro,
     fechaLimite: new Date(dueValue).toISOString(),
-
     estado: $("taskStatus").value,
-
     latitud: currentTaskLocation.latitude,
-
     longitud: currentTaskLocation.longitude,
-
     createdAt: oldTask
       ? oldTask.createdAt
-      : new Date().toISOString(),
-
+      : fechaRegistro,
     updatedAt: new Date().toISOString(),
-
     synced: false,
-
     deleted: false
   };
 
   try {
-    // Primero se guarda localmente.
     await CosmoDB.saveTask(task);
 
-    $("taskForm").reset();
-
-    editingTaskId = null;
-
-    currentTaskLocation = {
-      latitude: null,
-      longitude: null
-    };
-
-    $("taskFormTitle").textContent = "Registrar una tarea";
-
-    $("taskLocationStatus").textContent =
-      "La ubicación es opcional.";
+    resetTaskForm();
 
     await renderTasks();
     await updateCounters();
 
-    // El aviso no debe impedir que la tarea se guarde.
     await notifyTaskSaved(task.titulo);
 
     if (navigator.onLine) {
       try {
         await syncOneTask(task);
-
         showMessage(
           "Tarea guardada localmente y sincronizada con el servidor."
         );
       } catch (error) {
-        console.warn("Sincronización pendiente:", error);
-
         showMessage(
-          "La tarea quedó guardada localmente. " +
-          "La sincronización sigue pendiente.",
+          "La tarea quedó guardada localmente. La sincronización sigue pendiente.",
           "error"
         );
       }
     } else {
       showMessage(
-        "Tarea guardada en este dispositivo. " +
-        "Se sincronizará cuando vuelva internet."
+        "Tarea guardada en este dispositivo. Se sincronizará cuando vuelva internet."
       );
     }
 
     await renderTasks();
     await updateCounters();
   } catch (error) {
-    console.error(error);
-
     showMessage(
       "No se pudo guardar la tarea: " + error.message,
       "error"
@@ -851,26 +917,17 @@ async function saveTaskFromForm(event) {
 
 async function editTask(id) {
   const task = await CosmoDB.getTask(id);
-
   if (!task) return;
 
   editingTaskId = task.id;
 
   $("taskTitle").value = task.titulo;
-
-  $("taskDescription").value =
-    task.descripcion || "";
-
+  $("taskDescription").value = task.descripcion || "";
   $("taskStatus").value = task.estado;
+  $("taskPriority").value = task.prioridad || "media";
 
-  const date = new Date(task.fechaLimite);
-
-  const localDate = new Date(
-    date.getTime() - date.getTimezoneOffset() * 60000
-  );
-
-  $("taskDueDate").value =
-    localDate.toISOString().slice(0, 16);
+  $("taskRegisterDate").value = toDatetimeLocal(task.fechaRegistro || task.createdAt);
+  $("taskDueDate").value = toDatetimeLocal(task.fechaLimite);
 
   currentTaskLocation = {
     latitude: task.latitud ?? null,
@@ -883,11 +940,58 @@ async function editTask(id) {
       : "La ubicación es opcional.";
 
   $("taskFormTitle").textContent = "Editar tarea";
+  $("saveTaskBtn").textContent = "Actualizar tarea";
 
   $("taskForm").scrollIntoView({
     behavior: "smooth",
     block: "start"
   });
+}
+
+function resetTaskForm() {
+  editingTaskId = null;
+
+  currentTaskLocation = {
+    latitude: null,
+    longitude: null
+  };
+
+  $("taskForm").reset();
+
+  if ($("taskRegisterDate")) {
+    $("taskRegisterDate").value = toDatetimeLocal();
+  }
+  $("taskPriority").value = "media";
+
+  $("taskFormTitle").textContent = "Registrar una tarea";
+  $("saveTaskBtn").textContent = "Guardar tarea";
+  $("taskLocationStatus").textContent = "La ubicación es opcional.";
+}
+
+async function deleteTask(id) {
+  if (!confirm("¿Deseas eliminar esta tarea?")) return;
+
+  try {
+    await CosmoDB.deleteTask(id);
+
+    if (navigator.onLine) {
+      try {
+        await fetch(`/api/sync/${id}`, { method: "DELETE" });
+      } catch (error) {
+        console.warn("No se pudo eliminar en el servidor:", error);
+      }
+    }
+
+    if (editingTaskId === id) {
+      resetTaskForm();
+    }
+
+    showMessage("Tarea eliminada correctamente.");
+    await renderTasks();
+    await updateCounters();
+  } catch (error) {
+    showMessage("Error al eliminar la tarea: " + error.message, "error");
+  }
 }
 
 async function toggleTaskState(id) {
@@ -910,10 +1014,7 @@ async function toggleTaskState(id) {
     try {
       await syncOneTask(task);
     } catch (error) {
-      console.warn(
-        "La actualización queda pendiente:",
-        error
-      );
+      console.warn("La actualización queda pendiente:", error);
     }
   }
 
@@ -921,17 +1022,12 @@ async function toggleTaskState(id) {
   await updateCounters();
 }
 
-// ==========================================
-// ACTIVIDAD 12: GEOLOCALIZACIÓN
-// ==========================================
-
 function getTaskLocation() {
   const status = $("taskLocationStatus");
 
   if (!("geolocation" in navigator)) {
     status.textContent =
       "Tu navegador no admite geolocalización. Puedes guardar sin ubicación.";
-
     return;
   }
 
@@ -978,33 +1074,25 @@ function getTaskLocation() {
   );
 }
 
-// ==========================================
-// ACTIVIDAD 12: SINCRONIZACIÓN
-// ==========================================
-
 async function syncOneTask(task) {
   const response = await fetch("/api/sync", {
     method: "POST",
-
     headers: {
       "Content-Type": "application/json"
     },
-
     body: JSON.stringify({
       records: [
         {
           id: task.id,
           type: "tarea",
-
           title: task.titulo,
           detail: task.descripcion,
-
+          prioridad: task.prioridad || "media",
+          fechaRegistro: task.fechaRegistro || task.createdAt,
           fechaLimite: task.fechaLimite,
           estado: task.estado,
-
           latitud: task.latitud,
           longitud: task.longitud,
-
           createdAt: task.createdAt,
           updatedAt: task.updatedAt
         }
@@ -1021,9 +1109,7 @@ async function syncOneTask(task) {
     );
   }
 
-  // El servidor confirmó la operación.
   task.synced = true;
-
   await CosmoDB.saveTask(task);
 
   return result;
@@ -1035,7 +1121,6 @@ async function syncPendingTasks() {
       "No hay conexión. Las tareas siguen guardadas localmente.",
       "error"
     );
-
     return;
   }
 
@@ -1084,10 +1169,6 @@ async function syncPendingTasks() {
   }
 }
 
-// ==========================================
-// ACTIVIDAD 12: NOTIFICACIONES
-// ==========================================
-
 async function notifyTaskSaved(title) {
   if (
     !("Notification" in window) ||
@@ -1109,10 +1190,7 @@ async function notifyTaskSaved(title) {
       }
     });
   } catch (error) {
-    console.warn(
-      "No se pudo mostrar el aviso de tarea:",
-      error
-    );
+    console.warn("No se pudo mostrar el aviso de tarea:", error);
   }
 }
 
@@ -1146,16 +1224,9 @@ async function notifyPendingTasks() {
       }
     );
   } catch (error) {
-    console.warn(
-      "No se pudo mostrar el aviso de tareas pendientes:",
-      error
-    );
+    console.warn("No se pudo mostrar el aviso de tareas pendientes:", error);
   }
 }
-
-// ==========================================
-// NOTIFICACIONES LOCALES EXISTENTES
-// ==========================================
 
 async function notifyNoteSavedLocally(title) {
   if (
@@ -1181,10 +1252,7 @@ async function notifyNoteSavedLocally(title) {
       }
     );
   } catch (error) {
-    console.warn(
-      "No se pudo mostrar la notificación:",
-      error
-    );
+    console.warn("No se pudo mostrar la notificación:", error);
   }
 }
 
@@ -1194,14 +1262,12 @@ async function activateNotification() {
   if (!("Notification" in window)) {
     message.textContent =
       "Este navegador no admite notificaciones.";
-
     return;
   }
 
   if (!("serviceWorker" in navigator)) {
     message.textContent =
       "Este navegador no admite Service Workers.";
-
     return;
   }
 
@@ -1215,7 +1281,6 @@ async function activateNotification() {
     if (permission !== "granted") {
       message.textContent =
         "No se concedió el permiso para notificaciones.";
-
       return;
     }
 
@@ -1237,10 +1302,6 @@ async function activateNotification() {
   }
 }
 
-// ==========================================
-// GEOLOCALIZACIÓN GENERAL EXISTENTE
-// ==========================================
-
 function getDeviceLocation() {
   const message = $("deviceMessage");
   const result = $("locationResult");
@@ -1248,7 +1309,6 @@ function getDeviceLocation() {
   if (!("geolocation" in navigator)) {
     message.textContent =
       "Este navegador no admite geolocalización.";
-
     return;
   }
 
@@ -1293,10 +1353,6 @@ function getDeviceLocation() {
   );
 }
 
-// ==========================================
-// NOTIFICACIONES PUSH EXISTENTES
-// ==========================================
-
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat(
     (4 - base64String.length % 4) % 4
@@ -1323,14 +1379,12 @@ async function subscribeToPush() {
   ) {
     message.textContent =
       "Este navegador no admite notificaciones push.";
-
     return;
   }
 
   if (!window.isSecureContext) {
     message.textContent =
       "Las notificaciones push requieren HTTPS o localhost.";
-
     return;
   }
 
@@ -1344,7 +1398,6 @@ async function subscribeToPush() {
     if (permission !== "granted") {
       message.textContent =
         "No se autorizó el envío de notificaciones.";
-
       return;
     }
 
@@ -1364,7 +1417,6 @@ async function subscribeToPush() {
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-
         applicationServerKey:
           urlBase64ToUint8Array(publicKey)
       });
@@ -1372,11 +1424,9 @@ async function subscribeToPush() {
 
     const saveResponse = await fetch("/api/push/subscribe", {
       method: "POST",
-
       headers: {
         "Content-Type": "application/json"
       },
-
       body: JSON.stringify(subscription)
     });
 
@@ -1400,7 +1450,6 @@ async function sendPushTest() {
   if (!navigator.onLine) {
     message.textContent =
       "Necesitas conexión para solicitar el envío.";
-
     return;
   }
 
@@ -1422,10 +1471,6 @@ async function sendPushTest() {
   }
 }
 
-// ==========================================
-// CAMBIAR DE SECCIÓN
-// ==========================================
-
 async function setView(view) {
   currentView = view;
 
@@ -1438,12 +1483,37 @@ async function setView(view) {
 
   hideMessage();
 
-  await renderView();
-}
+  $("newsGrid").classList.toggle(
+    "hidden",
+    currentView === "bitacora" ||
+    currentView === "tareas"
+  );
 
-// ==========================================
-// MIGRACIÓN DE DATOS EXISTENTES
-// ==========================================
+  $("journalPanel").classList.toggle(
+    "hidden",
+    currentView !== "bitacora"
+  );
+
+  $("tasksPanel").classList.toggle(
+    "hidden",
+    currentView !== "tareas"
+  );
+
+  if (view === "bitacora") {
+    $("sectionEyebrow").textContent = "REGISTROS LOCALES Y SINCRONIZADOS";
+    $("sectionTitle").textContent = "Mi bitácora";
+    $("sourceBadge").textContent = "IndexedDB + Sync";
+    await renderJournal();
+    await loadServerRecords();
+  } else if (view === "tareas") {
+    $("sectionEyebrow").textContent = "ACTIVIDADES Y SEGUIMIENTO";
+    $("sectionTitle").textContent = "Gestión de tareas";
+    $("sourceBadge").textContent = "IndexedDB + Geolocalización";
+    await renderTasks();
+  } else {
+    await renderView();
+  }
+}
 
 async function migrateLegacyLocalStorage() {
   try {
@@ -1466,16 +1536,9 @@ async function migrateLegacyLocalStorage() {
       localStorage.removeItem(QUEUE_KEY);
     }
   } catch (error) {
-    console.warn(
-      "Aviso durante la migración de datos:",
-      error
-    );
+    console.warn("Aviso durante la migración de datos:", error);
   }
 }
-
-// ==========================================
-// EVENTOS
-// ==========================================
 
 document.querySelectorAll(".tab").forEach(button => {
   button.addEventListener("click", () => {
@@ -1485,71 +1548,47 @@ document.querySelectorAll(".tab").forEach(button => {
 
 $("refreshBtn").addEventListener("click", loadArticles);
 
-$("noteForm").addEventListener("submit", addNote);
+$("noteForm").addEventListener("submit", saveNoteFromForm);
+
+$("cancelNoteBtn").addEventListener("click", cancelNoteEdit);
+
+$("journalList").addEventListener("click", event => {
+  const editBtn = event.target.closest("[data-edit-note]");
+  const deleteBtn = event.target.closest("[data-delete-note]");
+
+  if (editBtn) {
+    editNote(editBtn.dataset.editNote);
+  }
+
+  if (deleteBtn) {
+    deleteNote(deleteBtn.dataset.deleteNote);
+  }
+});
 
 $("syncBtn").addEventListener("click", syncPending);
 
-$("loadServerBtn").addEventListener(
-  "click",
-  loadServerRecords
-);
+$("loadServerBtn").addEventListener("click", loadServerRecords);
 
-$("notificationBtn").addEventListener(
-  "click",
-  activateNotification
-);
+$("notificationBtn").addEventListener("click", activateNotification);
 
-$("locationBtn").addEventListener(
-  "click",
-  getDeviceLocation
-);
+$("locationBtn").addEventListener("click", getDeviceLocation);
 
-$("pushSubscribeBtn").addEventListener(
-  "click",
-  subscribeToPush
-);
+$("pushSubscribeBtn").addEventListener("click", subscribeToPush);
 
-$("pushTestBtn").addEventListener(
-  "click",
-  sendPushTest
-);
+$("pushTestBtn").addEventListener("click", sendPushTest);
 
-// Eventos de tareas.
-$("taskForm").addEventListener(
-  "submit",
-  saveTaskFromForm
-);
+$("taskForm").addEventListener("submit", saveTaskFromForm);
 
-$("taskLocationBtn").addEventListener(
-  "click",
-  getTaskLocation
-);
+$("taskLocationBtn").addEventListener("click", getTaskLocation);
 
-$("syncTasksBtn").addEventListener(
-  "click",
-  syncPendingTasks
-);
+$("syncTasksBtn").addEventListener("click", syncPendingTasks);
 
-$("cancelTaskBtn").addEventListener("click", () => {
-  editingTaskId = null;
-
-  currentTaskLocation = {
-    latitude: null,
-    longitude: null
-  };
-
-  $("taskForm").reset();
-
-  $("taskFormTitle").textContent =
-    "Registrar una tarea";
-
-  $("taskLocationStatus").textContent =
-    "La ubicación es opcional.";
-});
+$("cancelTaskBtn").addEventListener("click", resetTaskForm);
 
 $("taskList").addEventListener("click", event => {
   const editButton = event.target.closest("[data-edit-task]");
   const toggleButton = event.target.closest("[data-toggle-task]");
+  const deleteButton = event.target.closest("[data-delete-task]");
 
   if (editButton) {
     editTask(editButton.dataset.editTask);
@@ -1558,11 +1597,11 @@ $("taskList").addEventListener("click", event => {
   if (toggleButton) {
     toggleTaskState(toggleButton.dataset.toggleTask);
   }
-});
 
-// ==========================================
-// CONEXIÓN Y SINCRONIZACIÓN
-// ==========================================
+  if (deleteButton) {
+    deleteTask(deleteButton.dataset.deleteTask);
+  }
+});
 
 window.addEventListener("online", async () => {
   updateConnection();
@@ -1574,7 +1613,6 @@ window.addEventListener("online", async () => {
       showMessage(
         `Conexión recuperada. Sincronizando ${pending} registro(s).`
       );
-
       await syncPending();
     }
 
@@ -1589,7 +1627,7 @@ window.addEventListener("offline", () => {
   updateConnection();
 
   showMessage(
-    "Sin conexión. Puedes consultar los datos guardados y crear tareas.",
+    "Sin conexión. Puedes consultar los datos guardados y gestionar tareas.",
     "error"
   );
 });
@@ -1610,28 +1648,26 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-// ==========================================
-// INICIAR APLICACIÓN
-// ==========================================
-
 async function boot() {
   updateConnection();
 
+  if ($("noteRegisterDate")) {
+    $("noteRegisterDate").value = toDatetimeLocal();
+  }
+  if ($("taskRegisterDate")) {
+    $("taskRegisterDate").value = toDatetimeLocal();
+  }
+
   try {
     await CosmoDB.openDB();
-
     await migrateLegacyLocalStorage();
 
     if ("serviceWorker" in navigator) {
-      await navigator.serviceWorker.register(
-        "/service-worker.js"
-      );
+      await navigator.serviceWorker.register("/service-worker.js");
     }
 
     await loadArticles();
-
     await updateCounters();
-
     await renderTasks();
   } catch (error) {
     console.error("Error al iniciar la aplicación:", error);
