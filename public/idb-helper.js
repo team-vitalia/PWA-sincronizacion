@@ -1,72 +1,141 @@
 /**
- * CosmoDB - Capa de persistencia IndexedDB para CosmoBitácora PWA
- * 
- * Diseñada para funcionar tanto en el contexto de la ventana (Window)
- * como en el hilo de fondo del Service Worker (ServiceWorkerGlobalScope).
- * Proporciona almacenamiento transaccional seguro y asíncrono para notas
- * y para la cola de sincronización pendiente (Background Sync / Offline Sync).
+ * CosmoDB
+ * Almacenamiento local de CosmoBitácora.
+ *
+ * Incluye:
+ * - Notas de la bitácora.
+ * - Cola de sincronización.
+ * - Tareas de la Actividad 12.
  */
+
 (function (global) {
   const DB_NAME = "CosmoBitacoraDB";
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
 
   const STORES = {
     NOTES: "notes",
-    SYNC_QUEUE: "sync_queue"
+    SYNC_QUEUE: "sync_queue",
+    TASKS: "tasks"
   };
 
   let dbPromise = null;
 
   /**
-   * Abre o inicializa la base de datos IndexedDB.
-   * Crea los almacenes de objetos (stores) e índices necesarios si no existen.
-   * @returns {Promise<IDBDatabase>}
+   * Abrir o crear la base de datos.
    */
   function openDB() {
-    if (dbPromise) return dbPromise;
+    if (dbPromise) {
+      return dbPromise;
+    }
 
     dbPromise = new Promise((resolve, reject) => {
-      const idb = global.indexedDB || global.mozIndexedDB || global.webkitIndexedDB || global.msIndexedDB;
+      const idb =
+        global.indexedDB ||
+        global.mozIndexedDB ||
+        global.webkitIndexedDB ||
+        global.msIndexedDB;
+
       if (!idb) {
-        return reject(new Error("IndexedDB no está disponible en este entorno."));
+        reject(
+          new Error("IndexedDB no está disponible.")
+        );
+        return;
       }
 
       const request = idb.open(DB_NAME, DB_VERSION);
 
-      request.onupgradeneeded = (event) => {
+      request.onupgradeneeded = event => {
         const db = event.target.result;
 
-        // Store para la bitácora completa (historial local)
+        // Almacén de notas.
         if (!db.objectStoreNames.contains(STORES.NOTES)) {
-          const notesStore = db.createObjectStore(STORES.NOTES, { keyPath: "id" });
-          notesStore.createIndex("by_createdAt", "createdAt", { unique: false });
-          notesStore.createIndex("by_synced", "synced", { unique: false });
+          const notesStore = db.createObjectStore(
+            STORES.NOTES,
+            { keyPath: "id" }
+          );
+
+          notesStore.createIndex(
+            "by_createdAt",
+            "createdAt",
+            { unique: false }
+          );
+
+          notesStore.createIndex(
+            "by_synced",
+            "synced",
+            { unique: false }
+          );
         }
 
-        // Store para la cola de sincronización (registros pendientes de enviar al backend)
+        // Cola de sincronización existente.
         if (!db.objectStoreNames.contains(STORES.SYNC_QUEUE)) {
-          const queueStore = db.createObjectStore(STORES.SYNC_QUEUE, { keyPath: "id" });
-          queueStore.createIndex("by_createdAt", "createdAt", { unique: false });
+          const queueStore = db.createObjectStore(
+            STORES.SYNC_QUEUE,
+            { keyPath: "id" }
+          );
+
+          queueStore.createIndex(
+            "by_createdAt",
+            "createdAt",
+            { unique: false }
+          );
+        }
+
+        // Almacén nuevo para tareas.
+        if (!db.objectStoreNames.contains(STORES.TASKS)) {
+          const tasksStore = db.createObjectStore(
+            STORES.TASKS,
+            { keyPath: "id" }
+          );
+
+          tasksStore.createIndex(
+            "by_fechaLimite",
+            "fechaLimite",
+            { unique: false }
+          );
+
+          tasksStore.createIndex(
+            "by_estado",
+            "estado",
+            { unique: false }
+          );
+
+          tasksStore.createIndex(
+            "by_synced",
+            "synced",
+            { unique: false }
+          );
         }
       };
 
-      request.onsuccess = (event) => {
+      request.onsuccess = event => {
         const db = event.target.result;
-        db.onclose = () => { dbPromise = null; };
+
+        db.onclose = () => {
+          dbPromise = null;
+        };
+
         db.onversionchange = () => {
           db.close();
           dbPromise = null;
         };
+
         resolve(db);
       };
 
-      request.onerror = (event) => {
+      request.onerror = event => {
         dbPromise = null;
-        reject(event.target.error || new Error("Error al abrir IndexedDB"));
+
+        reject(
+          event.target.error ||
+          new Error("Error al abrir IndexedDB.")
+        );
       };
 
       request.onblocked = () => {
-        console.warn("[CosmoDB] La apertura de IndexedDB está bloqueada por otra pestaña abierta.");
+        console.warn(
+          "La actualización de IndexedDB está bloqueada. Cierra otras pestañas de la aplicación."
+        );
       };
     });
 
@@ -74,61 +143,77 @@
   }
 
   // ==========================================
-  // OPERACIONES DE NOTAS (BITÁCORA)
+  // NOTAS DE LA BITÁCORA
   // ==========================================
 
-  /**
-   * Guarda o actualiza una nota en el almacén de notas.
-   * @param {Object} note Objeto de nota { id, type, title, detail, createdAt, synced }
-   * @returns {Promise<Object>}
-   */
   async function saveNote(note) {
     const db = await openDB();
+
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORES.NOTES], "readwrite");
+      const tx = db.transaction(
+        [STORES.NOTES],
+        "readwrite"
+      );
+
       const store = tx.objectStore(STORES.NOTES);
-      const req = store.put(note);
-      req.onsuccess = () => resolve(note);
-      req.onerror = () => reject(req.error);
+
+      store.put(note);
+
+      tx.oncomplete = () => resolve(note);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
     });
   }
 
-  /**
-   * Obtiene todas las notas guardadas localmente.
-   * @returns {Promise<Array>}
-   */
   async function getAllNotes() {
     const db = await openDB();
+
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORES.NOTES], "readonly");
-      const store = tx.objectStore(STORES.NOTES);
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
+      const tx = db.transaction(
+        [STORES.NOTES],
+        "readonly"
+      );
+
+      const request = tx
+        .objectStore(STORES.NOTES)
+        .getAll();
+
+      request.onsuccess = () => {
+        resolve(request.result || []);
+      };
+
+      request.onerror = () => {
+        reject(request.error);
+      };
     });
   }
 
-  /**
-   * Marca una o varias notas como sincronizadas (synced: true).
-   * @param {string|string[]} ids Identificador(es) de nota
-   * @returns {Promise<void>}
-   */
   async function markNotesAsSynced(ids) {
     if (!ids) return;
+
     const list = Array.isArray(ids) ? ids : [ids];
-    if (!list.length) return;
+
+    if (list.length === 0) return;
 
     const db = await openDB();
+
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORES.NOTES], "readwrite");
+      const tx = db.transaction(
+        [STORES.NOTES],
+        "readwrite"
+      );
+
       const store = tx.objectStore(STORES.NOTES);
 
       for (const id of list) {
-        const getReq = store.get(id);
-        getReq.onsuccess = () => {
-          if (getReq.result) {
-            const updated = { ...getReq.result, synced: true };
-            store.put(updated);
+        const request = store.get(id);
+
+        request.onsuccess = () => {
+          if (request.result) {
+            store.put({
+              ...request.result,
+              synced: true
+            });
           }
         };
       }
@@ -140,73 +225,207 @@
   }
 
   // ==========================================
-  // OPERACIONES DE LA COLA DE SINCRONIZACIÓN
+  // COLA DE SINCRONIZACIÓN
   // ==========================================
 
-  /**
-   * Añade un registro a la cola de sincronización pendiente.
-   * @param {Object} item Registro pendiente { id, type, title, detail, createdAt }
-   * @returns {Promise<Object>}
-   */
   async function addToSyncQueue(item) {
     const db = await openDB();
+
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORES.SYNC_QUEUE], "readwrite");
-      const store = tx.objectStore(STORES.SYNC_QUEUE);
-      const req = store.put(item);
-      req.onsuccess = () => resolve(item);
-      req.onerror = () => reject(req.error);
+      const tx = db.transaction(
+        [STORES.SYNC_QUEUE],
+        "readwrite"
+      );
+
+      tx.objectStore(STORES.SYNC_QUEUE).put(item);
+
+      tx.oncomplete = () => resolve(item);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
     });
   }
 
-  /**
-   * Obtiene todos los registros pendientes de sincronizar con el backend.
-   * @returns {Promise<Array>}
-   */
   async function getSyncQueue() {
     const db = await openDB();
+
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORES.SYNC_QUEUE], "readonly");
-      const store = tx.objectStore(STORES.SYNC_QUEUE);
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
+      const tx = db.transaction(
+        [STORES.SYNC_QUEUE],
+        "readonly"
+      );
+
+      const request = tx
+        .objectStore(STORES.SYNC_QUEUE)
+        .getAll();
+
+      request.onsuccess = () => {
+        resolve(request.result || []);
+      };
+
+      request.onerror = () => {
+        reject(request.error);
+      };
     });
   }
 
-  /**
-   * Elimina un único registro de la cola de sincronización por su ID.
-   * @param {string} id ID del registro
-   * @returns {Promise<void>}
-   */
   async function removeFromSyncQueue(id) {
     const db = await openDB();
+
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORES.SYNC_QUEUE], "readwrite");
-      const store = tx.objectStore(STORES.SYNC_QUEUE);
-      const req = store.delete(id);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      const tx = db.transaction(
+        [STORES.SYNC_QUEUE],
+        "readwrite"
+      );
+
+      tx.objectStore(STORES.SYNC_QUEUE).delete(id);
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
     });
   }
 
-  /**
-   * Elimina un conjunto de registros de la cola de sincronización.
-   * @param {string[]} ids Lista de IDs
-   * @returns {Promise<void>}
-   */
   async function removeManyFromSyncQueue(ids) {
     if (!ids) return;
+
     const list = Array.isArray(ids) ? ids : [ids];
-    if (!list.length) return;
+
+    if (list.length === 0) return;
 
     const db = await openDB();
+
     return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORES.SYNC_QUEUE], "readwrite");
+      const tx = db.transaction(
+        [STORES.SYNC_QUEUE],
+        "readwrite"
+      );
+
       const store = tx.objectStore(STORES.SYNC_QUEUE);
+
       for (const id of list) {
         store.delete(id);
       }
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  async function countPending() {
+    const db = await openDB();
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(
+        [STORES.SYNC_QUEUE],
+        "readonly"
+      );
+
+      const request = tx
+        .objectStore(STORES.SYNC_QUEUE)
+        .count();
+
+      request.onsuccess = () => {
+        resolve(request.result || 0);
+      };
+
+      request.onerror = () => {
+        reject(request.error);
+      };
+    });
+  }
+
+  // ==========================================
+  // TAREAS: ACTIVIDAD 12
+  // ==========================================
+
+  /**
+   * Guarda una tarea nueva o actualiza una existente.
+   * El identificador id debe mantenerse al editar.
+   */
+  async function saveTask(task) {
+    const db = await openDB();
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(
+        [STORES.TASKS],
+        "readwrite"
+      );
+
+      tx.objectStore(STORES.TASKS).put(task);
+
+      tx.oncomplete = () => resolve(task);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  /**
+   * Obtiene todas las tareas locales.
+   */
+  async function getAllTasks() {
+    const db = await openDB();
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(
+        [STORES.TASKS],
+        "readonly"
+      );
+
+      const request = tx
+        .objectStore(STORES.TASKS)
+        .getAll();
+
+      request.onsuccess = () => {
+        resolve(request.result || []);
+      };
+
+      request.onerror = () => {
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Recupera una tarea por su identificador.
+   */
+  async function getTask(id) {
+    const db = await openDB();
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(
+        [STORES.TASKS],
+        "readonly"
+      );
+
+      const request = tx
+        .objectStore(STORES.TASKS)
+        .get(id);
+
+      request.onsuccess = () => {
+        resolve(request.result || null);
+      };
+
+      request.onerror = () => {
+        reject(request.error);
+      };
+    });
+  }
+
+  /**
+   * Elimina una tarea del almacenamiento local.
+   */
+  async function deleteTask(id) {
+    const db = await openDB();
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(
+        [STORES.TASKS],
+        "readwrite"
+      );
+
+      tx.objectStore(STORES.TASKS).delete(id);
+
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
@@ -214,31 +433,42 @@
   }
 
   /**
-   * Cuenta cuántos registros están pendientes de sincronizar.
-   * @returns {Promise<number>}
+   * Cambia el indicador de sincronización.
    */
-  async function countPending() {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction([STORES.SYNC_QUEUE], "readonly");
-      const store = tx.objectStore(STORES.SYNC_QUEUE);
-      const req = store.count();
-      req.onsuccess = () => resolve(req.result || 0);
-      req.onerror = () => reject(req.error);
-    });
+  async function markTaskAsSynced(id, synced = true) {
+    const task = await getTask(id);
+
+    if (!task) return null;
+
+    task.synced = synced;
+
+    return saveTask(task);
   }
 
-  // Exponer API limpia en el ámbito global (window o ServiceWorkerGlobalScope)
+  // API pública.
   global.CosmoDB = {
     openDB,
+
+    // Notas.
     saveNote,
     getAllNotes,
     markNotesAsSynced,
+
+    // Cola de sincronización.
     addToSyncQueue,
     getSyncQueue,
     removeFromSyncQueue,
     removeManyFromSyncQueue,
     countPending,
+
+    // Tareas.
+    saveTask,
+    getAllTasks,
+    getTask,
+    deleteTask,
+    markTaskAsSynced,
+
     STORES
   };
+
 })(typeof self !== "undefined" ? self : this);
