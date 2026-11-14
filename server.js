@@ -24,7 +24,26 @@ if (!fs.existsSync(DB_FILE)) {
 }
 
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+app.use(
+  express.static(path.join(__dirname, "public"), {
+    etag: true,
+    setHeaders(res, filePath) {
+      const name = path.basename(filePath);
+
+      if (name === "service-worker.js" || name.endsWith(".html")) {
+        // El service worker y el HTML siempre se revalidan.
+        res.setHeader("Cache-Control", "no-cache");
+      } else if (/\.(svg|png|jpe?g|webp|ico|woff2?)$/i.test(name)) {
+        res.setHeader("Cache-Control", "public, max-age=2592000");
+      } else {
+        res.setHeader(
+          "Cache-Control",
+          "public, max-age=86400, stale-while-revalidate=604800"
+        );
+      }
+    }
+  })
+);
 
 function readSubscriptions() {
   try {

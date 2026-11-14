@@ -4,6 +4,29 @@ const API_URL = "https://api.spaceflightnewsapi.net/v4/articles/?limit=12";
 
 const $ = id => document.getElementById(id);
 
+const CACHED_ARTICLES_KEY = "cosmobitacora_cached_articles_v1";
+
+// Cede el hilo principal para evitar tareas largas (mejora TBT/INP).
+function yieldToMain() {
+  if (globalThis.scheduler && typeof scheduler.yield === "function") {
+    return scheduler.yield();
+  }
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+// Ejecuta trabajo no crítico cuando el navegador está libre.
+function runWhenIdle(task) {
+  const run = () => Promise.resolve().then(task).catch(error => {
+    console.warn("Tarea diferida con error:", error);
+  });
+
+  if ("requestIdleCallback" in window) {
+    requestIdleCallback(run, { timeout: 3000 });
+  } else {
+    setTimeout(run, 1500);
+  }
+}
+
 const FAVORITES_KEY = "cosmobitacora_favorites_v1";
 const NOTES_KEY = "cosmobitacora_notes_v1";
 const QUEUE_KEY = "cosmobitacora_sync_queue_v1";
@@ -94,18 +117,23 @@ function updateConnection() {
 async function loadArticles() {
   hideMessage();
 
-  $("newsGrid").innerHTML =
-    '<div class="empty">Buscando noticias espaciales…</div>';
+  // Mostrar primero lo guardado (render inmediato) y refrescar después.
+  const cachedArticles = safeRead(CACHED_ARTICLES_KEY);
+  const renderedFromCache = cachedArticles.length > 0;
+
+  if (renderedFromCache) {
+    articles = cachedArticles;
+    await renderView();
+  } else {
+    $("newsGrid").innerHTML =
+      '<div class="empty">Buscando noticias espaciales…</div>';
+  }
 
   if (!navigator.onLine) {
-    articles = safeRead("cosmobitacora_cached_articles_v1");
-
     if (articles.length) {
       showMessage(
         "Estás sin conexión. Se muestran las noticias guardadas en este dispositivo."
       );
-
-      await renderView();
     } else {
       $("newsGrid").innerHTML =
         '<div class="empty">No hay noticias guardadas todavía. Conéctate una vez para descargar contenido.</div>';
@@ -132,7 +160,7 @@ async function loadArticles() {
 
     const data = await response.json();
 
-    articles = (data.results || []).map(article => ({
+    const freshArticles = (data.results || []).map(article => ({
       id: String(article.id),
       title: article.title || "Noticia espacial",
       summary: article.summary || "",
@@ -142,17 +170,26 @@ async function loadArticles() {
       source: article.news_site || "Spaceflight News"
     }));
 
-    safeWrite("cosmobitacora_cached_articles_v1", articles);
+    const changed =
+      JSON.stringify(freshArticles) !== JSON.stringify(cachedArticles);
 
-    await renderView();
+    articles = freshArticles;
+    safeWrite(CACHED_ARTICLES_KEY, articles);
+
+    if (changed || !renderedFromCache) {
+      await renderView();
+    }
   } catch (error) {
-    articles = safeRead("cosmobitacora_cached_articles_v1");
+    articles = safeRead(CACHED_ARTICLES_KEY);
 
     if (articles.length) {
       showMessage(
         "No se pudo consultar la API. Mostrando noticias locales."
       );
-      await renderView();
+
+      if (!renderedFromCache) {
+        await renderView();
+      }
     } else {
       $("newsGrid").innerHTML = `
         <div class="empty">
@@ -208,13 +245,13 @@ async function renderView() {
 
   let list = articles;
 
-  if (currentView === "favoritos") {
-    const ids = new Set(
-      safeRead(FAVORITES_KEY).map(item => String(item.id))
-    );
+  const favoriteIds = new Set(
+    safeRead(FAVORITES_KEY).map(item => String(item.id))
+  );
 
+  if (currentView === "favoritos") {
     list = articles.filter(
-      article => ids.has(String(article.id))
+      article => favoriteIds.has(String(article.id))
     );
 
     $("sectionEyebrow").textContent = "TU COLECCIÓN";
@@ -238,10 +275,8 @@ async function renderView() {
     return;
   }
 
-  $("newsGrid").innerHTML = list.map(article => {
-    const saved = safeRead(FAVORITES_KEY).some(
-      item => String(item.id) === String(article.id)
-    );
+  $("newsGrid").innerHTML = list.map((article, index) => {
+    const saved = favoriteIds.has(String(article.id));
 
     const date = article.published
       ? new Date(article.published).toLocaleDateString("es-MX")
@@ -254,7 +289,9 @@ async function renderView() {
             ? `<img class="news-image"
                     src="${escapeHTML(article.image)}"
                     alt=""
-                    loading="lazy"
+                    loading="${index < 2 ? "eager" : "lazy"}"
+                    ${index === 0 ? 'fetchpriority="high"' : ""}
+                    decoding="async"
                     onerror="this.style.display='none'">`
             : '<div class="news-image placeholder">✦</div>'
         }
@@ -287,6 +324,7 @@ async function renderView() {
             <a
               class="small-btn link"
               href="${escapeHTML(article.url)}"
+              aria-label="Leer noticia: ${escapeHTML(article.title)} (se abre en una pestaña nueva)"
               target="_blank"
               rel="noopener noreferrer">
               Leer noticia ↗
@@ -1648,6 +1686,21 @@ if ("serviceWorker" in navigator) {
   });
 }
 
+function hideSplash() {
+  const splash = $("splash");
+  splash.classList.add("fade");
+
+  setTimeout(() => {
+    splash.classList.add("hidden");
+  }, 500);
+}
+
+async function registerServiceWorker() {
+  if ("serviceWorker" in navigator) {
+    await navigator.serviceWorker.register("/service-worker.js");
+  }
+}
+
 async function boot() {
   updateConnection();
 
@@ -1658,17 +1711,15 @@ async function boot() {
     $("taskRegisterDate").value = toDatetimeLocal();
   }
 
+  // La app se renderiza detrás del splash para no esperar a la red.
+  $("app").classList.remove("hidden");
+  setTimeout(hideSplash, 400);
+
   try {
     await CosmoDB.openDB();
-    await migrateLegacyLocalStorage();
-
-    if ("serviceWorker" in navigator) {
-      await navigator.serviceWorker.register("/service-worker.js");
-    }
-
     await loadArticles();
+    await yieldToMain();
     await updateCounters();
-    await renderTasks();
   } catch (error) {
     console.error("Error al iniciar la aplicación:", error);
 
@@ -1678,14 +1729,12 @@ async function boot() {
     );
   }
 
-  setTimeout(() => {
-    $("splash").classList.add("fade");
-
-    setTimeout(() => {
-      $("splash").classList.add("hidden");
-      $("app").classList.remove("hidden");
-    }, 500);
-  }, 700);
+  // Trabajo no crítico: fuera de la ruta de carga inicial.
+  runWhenIdle(registerServiceWorker);
+  runWhenIdle(async () => {
+    await migrateLegacyLocalStorage();
+    await updateCounters();
+  });
 }
 
 boot();
