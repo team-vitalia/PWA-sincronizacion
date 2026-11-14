@@ -18,7 +18,7 @@
     <link rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&family=Space+Grotesk:wght@600&display=swap">
   </noscript>
-
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <title>CosmoBitácora | ExploraPWA</title>
 </head>
 
@@ -238,13 +238,48 @@
           </div>
 
           <div class="server-records">
-            <h3>Registros recibidos por el servidor</h3>
+            <div class="records-header-bar">
+              <div>
+                <h3>Registros recibidos por el servidor</h3>
+                <button id="loadServerBtn" class="text-button" type="button">
+                  Consultar servidor
+                </button>
+              </div>
+              <button id="exportServerCsvBtn" class="button button-outline small-action-btn" type="button" title="Descargar bitácora en formato CSV">
+                <i class="fas fa-file-csv"></i> Exportar a CSV
+              </button>
+            </div>
 
-            <button id="loadServerBtn" class="text-button" type="button">
-              Consultar servidor
-            </button>
+            <div class="filter-toolbar">
+              <div class="search-box">
+                <input
+                  id="serverSearchInput"
+                  type="search"
+                  placeholder="Buscar por título o contenido..."
+                  aria-label="Buscar en registros del servidor">
+              </div>
+              <div class="filter-select-box">
+                <select id="serverPriorityFilter" aria-label="Filtrar por prioridad">
+                  <option value="todas">Todas las prioridades</option>
+                  <option value="baja">Baja</option>
+                  <option value="media">Media</option>
+                  <option value="alta">Alta</option>
+                  <option value="urgente">Urgente</option>
+                </select>
+              </div>
+            </div>
 
             <div id="serverList"></div>
+
+            <div id="serverPagination" class="pagination-controls hidden" aria-label="Paginación de bitácora">
+              <button id="serverPrevPageBtn" class="button button-outline pagination-btn" type="button">
+                ← Anterior
+              </button>
+              <span id="serverPageInfo" class="pagination-info">Página 1 de 1</span>
+              <button id="serverNextPageBtn" class="button button-outline pagination-btn" type="button">
+                Siguiente →
+              </button>
+            </div>
           </div>
         </div>
 
@@ -334,22 +369,59 @@
             <div class="journal-tools">
               <h3>Mis tareas</h3>
 
-              <button
-                id="syncTasksBtn"
-                class="button button-outline"
-                type="button">
-                ⇅ Sincronizar tareas
-              </button>
+              <div class="task-tools-buttons">
+                <button
+                  id="exportTasksCsvBtn"
+                  class="button button-outline small-action-btn"
+                  type="button"
+                  title="Descargar tareas en formato CSV">
+                  <i class="fas fa-file-csv"></i> Exportar a CSV
+                </button>
+                <button
+                  id="syncTasksBtn"
+                  class="button button-outline"
+                  type="button">
+                  ⇅ Sincronizar tareas
+                </button>
+              </div>
+            </div>
+
+            <div class="filter-toolbar">
+              <div class="search-box">
+                <input
+                  id="taskSearchInput"
+                  type="search"
+                  placeholder="Buscar tareas por título o detalle..."
+                  aria-label="Buscar tareas">
+              </div>
+              <div class="filter-select-box">
+                <select id="taskStatusFilter" aria-label="Filtrar por estado">
+                  <option value="todos">Todos los estados</option>
+                  <option value="pendiente">Pendientes</option>
+                  <option value="en progreso">En progreso</option>
+                  <option value="completada">Completadas</option>
+                </select>
+              </div>
             </div>
 
             <div id="taskList" class="journal-list"></div>
+
+            <div id="taskPagination" class="pagination-controls hidden" aria-label="Paginación de tareas">
+              <button id="taskPrevPageBtn" class="button button-outline pagination-btn" type="button">
+                ← Anterior
+              </button>
+              <span id="taskPageInfo" class="pagination-info">Página 1 de 1</span>
+              <button id="taskNextPageBtn" class="button button-outline pagination-btn" type="button">
+                Siguiente →
+              </button>
+            </div>
           </div>
         </section>
       </section>
     </main>
 
     <footer>
-      <span>CosmoBitácora · PWA educativa</span>
+      <span>CosmoBitácora v1.2.0 · PWA educativa</span>
       <span>Datos espaciales: Spaceflight News API</span>
     </footer>
   </div>

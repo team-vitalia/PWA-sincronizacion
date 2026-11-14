@@ -699,10 +699,127 @@ async function requestBackgroundSync() {
   }
 }
 
+const PAGE_SIZE = 10;
+
+let serverRecordsData = [];
+let serverCurrentPage = 1;
+let serverSearchQuery = "";
+let serverPriorityFilter = "todas";
+
+let allTasksCache = [];
+let taskCurrentPage = 1;
+let taskSearchQuery = "";
+let taskStatusFilter = "todos";
+
+function exportToCSV(filename, headers, rows) {
+  const escapeCell = value => {
+    if (value === null || value === undefined) return '""';
+    const str = String(value).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const csvRows = [
+    headers.map(escapeCell).join(","),
+    ...rows.map(row => row.map(escapeCell).join(","))
+  ];
+
+  const csvContent = csvRows.join("\r\n");
+  const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function getFilteredServerRecords() {
+  const query = serverSearchQuery.trim().toLowerCase();
+  return serverRecordsData.filter(record => {
+    const matchesPriority =
+      serverPriorityFilter === "todas" ||
+      (record.prioridad || "media").toLowerCase() === serverPriorityFilter.toLowerCase();
+
+    if (!matchesPriority) return false;
+
+    if (!query) return true;
+
+    const title = (record.title || "").toLowerCase();
+    const detail = (record.detail || "").toLowerCase();
+    return title.includes(query) || detail.includes(query);
+  });
+}
+
+function renderServerRecordsPage() {
+  const filtered = getFilteredServerRecords();
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  if (serverCurrentPage > totalPages) {
+    serverCurrentPage = totalPages;
+  }
+  if (serverCurrentPage < 1) {
+    serverCurrentPage = 1;
+  }
+
+  const start = (serverCurrentPage - 1) * PAGE_SIZE;
+  const pageItems = filtered.slice(start, start + PAGE_SIZE);
+
+  const list = $("serverList");
+  const pagination = $("serverPagination");
+  const pageInfo = $("serverPageInfo");
+  const prevBtn = $("serverPrevPageBtn");
+  const nextBtn = $("serverNextPageBtn");
+
+  if (!filtered.length) {
+    list.innerHTML = serverRecordsData.length
+      ? '<p class="empty">No se encontraron registros que coincidan con la búsqueda.</p>'
+      : '<p>Aún no hay registros recibidos por el servidor.</p>';
+    if (pagination) pagination.classList.add("hidden");
+    return;
+  }
+
+  list.innerHTML = pageItems.map(record => `
+    <div class="server-record">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <strong>${escapeHTML(record.title)}</strong>
+        <span class="priority-badge priority-${escapeHTML((record.prioridad || "media").toLowerCase())}">
+          ${escapeHTML(record.prioridad || "media")}
+        </span>
+      </div>
+
+      <span>
+        ${escapeHTML(record.detail || "Sin descripción")}
+      </span><br>
+
+      <small>
+        Registro: ${escapeHTML(new Date(record.fechaRegistro || record.createdAt).toLocaleString("es-MX"))} · Recibido: ${escapeHTML(new Date(record.syncedAt).toLocaleString("es-MX"))}
+      </small>
+    </div>
+  `).join("");
+
+  if (pagination) {
+    pagination.classList.remove("hidden");
+    if (pageInfo) {
+      pageInfo.textContent = `Página ${serverCurrentPage} de ${totalPages} (${total} registro${total === 1 ? "" : "s"})`;
+    }
+    if (prevBtn) {
+      prevBtn.disabled = serverCurrentPage <= 1;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = serverCurrentPage >= totalPages;
+    }
+  }
+}
+
 async function loadServerRecords() {
   if (!navigator.onLine) {
     $("serverList").innerHTML =
       '<p class="empty">El servidor no está disponible sin conexión.</p>';
+    const pagination = $("serverPagination");
+    if (pagination) pagination.classList.add("hidden");
     return;
   }
 
@@ -714,59 +831,92 @@ async function loadServerRecords() {
     }
 
     const data = await response.json();
+    serverRecordsData = Array.isArray(data.records)
+      ? data.records.slice().reverse()
+      : [];
 
-    $("serverList").innerHTML = data.records.length
-      ? data.records.slice().reverse().map(record => `
-          <div class="server-record">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-              <strong>${escapeHTML(record.title)}</strong>
-              <span class="priority-badge priority-${escapeHTML((record.prioridad || "media").toLowerCase())}">
-                ${escapeHTML(record.prioridad || "media")}
-              </span>
-            </div>
-
-            <span>
-              ${escapeHTML(record.detail || "Sin descripción")}
-            </span><br>
-
-            <small>
-              Registro: ${escapeHTML(new Date(record.fechaRegistro || record.createdAt).toLocaleString("es-MX"))} · Recibido: ${escapeHTML(new Date(record.syncedAt).toLocaleString("es-MX"))}
-            </small>
-          </div>
-        `).join("")
-      : "<p>Aún no hay registros recibidos por el servidor.</p>";
+    renderServerRecordsPage();
   } catch (error) {
     $("serverList").textContent = error.message;
+    const pagination = $("serverPagination");
+    if (pagination) pagination.classList.add("hidden");
   }
 }
 
-async function renderTasks() {
-  const allTasks = await CosmoDB.getAllTasks();
-
-  const tasks = allTasks
-    .filter(task => !task.deleted)
-    .sort(
-      (a, b) =>
-        new Date(a.fechaLimite) - new Date(b.fechaLimite)
-    );
-
-  $("taskCount").textContent = tasks.filter(
-    task => task.estado !== "completada"
-  ).length;
-
-  const list = $("taskList");
-
-  if (!tasks.length) {
-    list.innerHTML = `
-      <div class="empty">
-        No tienes tareas registradas.
-        Utiliza el formulario para crear la primera.
-      </div>
-    `;
+function exportServerRecordsToCSV() {
+  const records = getFilteredServerRecords();
+  if (!records.length) {
+    showMessage("No hay registros en la bitácora para exportar.", "info");
     return;
   }
 
-  list.innerHTML = tasks.map(task => {
+  const headers = ["ID", "Título", "Detalle", "Prioridad", "Fecha de Registro", "Fecha Sincronización"];
+  const rows = records.map(r => [
+    r.id || "",
+    r.title || "",
+    r.detail || "",
+    r.prioridad || "media",
+    r.fechaRegistro || r.createdAt || "",
+    r.syncedAt || ""
+  ]);
+
+  const timestamp = new Date().toISOString().slice(0, 10);
+  exportToCSV(`bitacora_servidor_${timestamp}.csv`, headers, rows);
+  showMessage(`Bitácora exportada correctamente (${records.length} registros).`, "info");
+}
+
+function getFilteredTasks() {
+  const query = taskSearchQuery.trim().toLowerCase();
+  return allTasksCache
+    .filter(task => !task.deleted)
+    .filter(task => {
+      const matchesStatus =
+        taskStatusFilter === "todos" ||
+        task.estado === taskStatusFilter;
+
+      if (!matchesStatus) return false;
+
+      if (!query) return true;
+
+      const title = (task.titulo || "").toLowerCase();
+      const desc = (task.descripcion || "").toLowerCase();
+      return title.includes(query) || desc.includes(query);
+    })
+    .sort(
+      (a, b) => new Date(a.fechaLimite) - new Date(b.fechaLimite)
+    );
+}
+
+function renderTasksPage() {
+  const filtered = getFilteredTasks();
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  if (taskCurrentPage > totalPages) {
+    taskCurrentPage = totalPages;
+  }
+  if (taskCurrentPage < 1) {
+    taskCurrentPage = 1;
+  }
+
+  const start = (taskCurrentPage - 1) * PAGE_SIZE;
+  const pageItems = filtered.slice(start, start + PAGE_SIZE);
+
+  const list = $("taskList");
+  const pagination = $("taskPagination");
+  const pageInfo = $("taskPageInfo");
+  const prevBtn = $("taskPrevPageBtn");
+  const nextBtn = $("taskNextPageBtn");
+
+  if (!filtered.length) {
+    list.innerHTML = allTasksCache.filter(t => !t.deleted).length
+      ? '<div class="empty">No se encontraron tareas que coincidan con la búsqueda.</div>'
+      : '<div class="empty">No tienes tareas registradas. Utiliza el formulario para crear la primera.</div>';
+    if (pagination) pagination.classList.add("hidden");
+    return;
+  }
+
+  list.innerHTML = pageItems.map(task => {
     const dueDate = new Date(task.fechaLimite);
     const regDate = new Date(task.fechaRegistro || task.createdAt);
 
@@ -866,6 +1016,58 @@ async function renderTasks() {
       </article>
     `;
   }).join("");
+
+  if (pagination) {
+    pagination.classList.remove("hidden");
+    if (pageInfo) {
+      pageInfo.textContent = `Página ${taskCurrentPage} de ${totalPages} (${total} tarea${total === 1 ? "" : "s"})`;
+    }
+    if (prevBtn) {
+      prevBtn.disabled = taskCurrentPage <= 1;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = taskCurrentPage >= totalPages;
+    }
+  }
+}
+
+async function renderTasks() {
+  allTasksCache = await CosmoDB.getAllTasks();
+
+  $("taskCount").textContent = allTasksCache.filter(
+    task => !task.deleted && task.estado !== "completada"
+  ).length;
+
+  renderTasksPage();
+}
+
+function exportTasksToCSV() {
+  const tasks = getFilteredTasks();
+  if (!tasks.length) {
+    showMessage("No hay tareas para exportar.", "info");
+    return;
+  }
+
+  const headers = ["ID", "Título", "Descripción", "Prioridad", "Estado", "Fecha Registro", "Fecha Límite", "Ubicación", "Sincronizada"];
+  const rows = tasks.map(t => {
+    const hasLocation = Number.isFinite(t.latitud) && Number.isFinite(t.longitud);
+    const loc = hasLocation ? `${t.latitud}, ${t.longitud}` : "Sin ubicación";
+    return [
+      t.id || "",
+      t.titulo || "",
+      t.descripcion || "",
+      t.prioridad || "media",
+      t.estado || "",
+      t.fechaRegistro || t.createdAt || "",
+      t.fechaLimite || "",
+      loc,
+      t.synced ? "Sí" : "No"
+    ];
+  });
+
+  const timestamp = new Date().toISOString().slice(0, 10);
+  exportToCSV(`tareas_${timestamp}.csv`, headers, rows);
+  showMessage(`Tareas exportadas correctamente (${tasks.length} tareas).`, "info");
 }
 
 async function saveTaskFromForm(event) {
@@ -1607,6 +1809,32 @@ $("syncBtn").addEventListener("click", syncPending);
 
 $("loadServerBtn").addEventListener("click", loadServerRecords);
 
+$("serverSearchInput").addEventListener("input", event => {
+  serverSearchQuery = event.target.value;
+  serverCurrentPage = 1;
+  renderServerRecordsPage();
+});
+
+$("serverPriorityFilter").addEventListener("change", event => {
+  serverPriorityFilter = event.target.value;
+  serverCurrentPage = 1;
+  renderServerRecordsPage();
+});
+
+$("serverPrevPageBtn").addEventListener("click", () => {
+  if (serverCurrentPage > 1) {
+    serverCurrentPage--;
+    renderServerRecordsPage();
+  }
+});
+
+$("serverNextPageBtn").addEventListener("click", () => {
+  serverCurrentPage++;
+  renderServerRecordsPage();
+});
+
+$("exportServerCsvBtn").addEventListener("click", exportServerRecordsToCSV);
+
 $("notificationBtn").addEventListener("click", activateNotification);
 
 $("locationBtn").addEventListener("click", getDeviceLocation);
@@ -1622,6 +1850,32 @@ $("taskLocationBtn").addEventListener("click", getTaskLocation);
 $("syncTasksBtn").addEventListener("click", syncPendingTasks);
 
 $("cancelTaskBtn").addEventListener("click", resetTaskForm);
+
+$("taskSearchInput").addEventListener("input", event => {
+  taskSearchQuery = event.target.value;
+  taskCurrentPage = 1;
+  renderTasksPage();
+});
+
+$("taskStatusFilter").addEventListener("change", event => {
+  taskStatusFilter = event.target.value;
+  taskCurrentPage = 1;
+  renderTasksPage();
+});
+
+$("taskPrevPageBtn").addEventListener("click", () => {
+  if (taskCurrentPage > 1) {
+    taskCurrentPage--;
+    renderTasksPage();
+  }
+});
+
+$("taskNextPageBtn").addEventListener("click", () => {
+  taskCurrentPage++;
+  renderTasksPage();
+});
+
+$("exportTasksCsvBtn").addEventListener("click", exportTasksToCSV);
 
 $("taskList").addEventListener("click", event => {
   const editButton = event.target.closest("[data-edit-task]");

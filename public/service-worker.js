@@ -2,7 +2,7 @@
 
 importScripts("/idb-helper.js");
 
-const CACHE_NAME = "cosmobitacora-static-v8";
+const CACHE_NAME = "v1.2.0";
 
 const APP_SHELL = [
   "/",
@@ -31,7 +31,10 @@ self.addEventListener("activate", event => {
         Promise.all(
           keys
             .filter(key => key !== CACHE_NAME)
-            .map(key => caches.delete(key))
+            .map(key => {
+              console.log(`[SW v1.2.0] Eliminando caché previa obsoleta: ${key}`);
+              return caches.delete(key);
+            })
         )
       )
       .then(() => self.clients.claim())
